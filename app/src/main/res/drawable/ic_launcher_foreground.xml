@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Notebook body -->
+    <path
+        android:fillColor="#FF00E5FF"
+        android:pathData="M34,28h40c3.3,0 6,2.7 6,6v40c0,3.3 -2.7,6 -6,6H34c-3.3,0 -6,-2.7 -6,-6V34C28,30.7 30.7,28 34,28z" />
+    <!-- Spine -->
+    <path
+        android:fillColor="#FF121212"
+        android:pathData="M34,28h6v52h-6c-3.3,0 -6,-2.7 -6,-6V34C28,30.7 30.7,28 34,28z" />
+    <!-- Ruled lines -->
+    <path
+        android:fillColor="#FF121212"
+        android:pathData="M47,42h26v4H47z" />
+    <path
+        android:fillColor="#FF121212"
+        android:pathData="M47,52h26v4H47z" />
+    <path
+        android:fillColor="#FF121212"
+        android:pathData="M47,62h16v4H47z" />
+</vector>

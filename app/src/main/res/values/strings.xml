@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">გონების დღიური</string>
+
+    <!-- ნავიგაცია -->
+    <string name="nav_home">დღიური</string>
+    <string name="nav_insights">ანალიზი</string>
+    <string name="nav_schedule">გრაფიკი</string>
+    <string name="nav_settings">პარამეტრები</string>
+
+    <!-- მთავარი ეკრანი -->
+    <string name="home_title">დღიური</string>
+    <string name="home_subtitle">%1$d ჩანაწერი</string>
+    <string name="home_empty_title">ჯერ ჩანაწერი არ არის</string>
+    <string name="home_empty_body">დაელოდე შეტყობინებას, ან დაამატე პირველი ჩანაწერი ქვემოთ მოცემული ღილაკით.</string>
+    <string name="home_today">დღეს</string>
+    <string name="home_yesterday">გუშინ</string>
+    <string name="fab_add">ახალი ჩანაწერი</string>
+
+    <!-- ჩანაწერის დამატება -->
+    <string name="dialog_new_title">ახალი ჩანაწერი</string>
+    <string name="dialog_hint">დაიწყე წერა…</string>
+    <string name="action_save">შენახვა</string>
+    <string name="action_cancel">გაუქმება</string>
+    <string name="action_shuffle">სხვა შეკითხვა</string>
+    <string name="action_delete">წაშლა</string>
+    <string name="action_ok">კარგი</string>
+    <string name="entry_saved">ჩანაწერი შენახულია</string>
+    <string name="entry_deleted">ჩანაწერი წაიშალა</string>
+    <string name="source_notification">შეტყობინებიდან</string>
+
+    <!-- ანალიზის ეკრანი -->
+    <string name="insights_title">ანალიზი</string>
+    <string name="insights_tags">სემანტიკური თემები</string>
+    <string name="insights_tags_empty">თემები გამოჩნდება მაშინ, როცა AI ანალიზს გაუშვებ.</string>
+    <string name="insights_weekly">კვირის რეფლექსია</string>
+    <string name="insights_weekly_empty">კვირის რეფლექსია ჯერ არ არის შექმნილი.</string>
+    <string name="insights_generate">კვირის რეფლექსიის გენერაცია</string>
+    <string name="insights_analyze">ჩანაწერების ანალიზი</string>
+    <string name="insights_pending">გაუანალიზებელი ჩანაწერი: %1$d</string>
+    <string name="insights_tagged">%1$d ჩანაწერი გაანალიზდა</string>
+    <string name="insights_updated">განახლდა: %1$s</string>
+    <string name="insights_need_key">AI ფუნქციებისთვის დაამატე OpenRouter-ის API გასაღები პარამეტრებში.</string>
+    <string name="insights_working">ანალიზი მიმდინარეობს…</string>
+    <string name="insights_stat_entries">ჩანაწერი</string>
+    <string name="insights_stat_week">ამ კვირაში</string>
+    <string name="insights_stat_tags">თემა</string>
+
+    <!-- გრაფიკის ეკრანი -->
+    <string name="config_title">შეტყობინებების გრაფიკი</string>
+    <string name="config_explainer">დღის ფანჯარა იყოფა თანაბარ ნაწილებად და თითოეულში ერთი შეთხზული შეკითხვა მოდის შემთხვევით მომენტში — ასე შეტყობინებები არასდროს გროვდება ერთად.</string>
+    <string name="config_enabled">შეტყობინებები აქტიურია</string>
+    <string name="config_count">შეტყობინება დღეში: %1$d</string>
+    <string name="config_window">დროის ფანჯარა</string>
+    <string name="config_start">დაწყება: %1$s</string>
+    <string name="config_end">დასრულება: %1$s</string>
+    <string name="config_chunk">ერთი ნაწილი ≈ %1$d წუთი</string>
+    <string name="config_preview">დღევანდელი გრაფიკის მაგალითი</string>
+    <string name="config_save">გრაფიკის შენახვა</string>
+    <string name="config_saved">გრაფიკი განახლდა</string>
+    <string name="config_disabled_hint">შეტყობინებები გამორთულია — გრაფიკი არ იმუშავებს.</string>
+    <string name="config_exact_alarm">ზუსტი შეტყობინებებისთვის საჭიროა სისტემური ნებართვა. გახსენი პარამეტრები და დაუშვი „მაღვიძარები და შეხსენებები“.</string>
+    <string name="config_open_settings">სისტემის პარამეტრების გახსნა</string>
+    <string name="config_permission_needed">შეტყობინებების ნებართვა საჭიროა</string>
+    <string name="config_grant_permission">ნებართვის მიცემა</string>
+
+    <!-- პარამეტრების ეკრანი -->
+    <string name="settings_title">პარამეტრები</string>
+    <string name="settings_accent">აქცენტის ფერი</string>
+    <string name="settings_ai">AI და კონფიდენციალურობა</string>
+    <string name="settings_ai_enabled">AI ანალიზი ჩართულია</string>
+    <string name="settings_api_key">OpenRouter API გასაღები</string>
+    <string name="settings_api_key_hint">sk-or-v1-…</string>
+    <string name="settings_api_key_stored">გასაღები დაშიფრულად ინახება მოწყობილობაზე</string>
+    <string name="settings_api_key_empty">გასაღები არ არის დამატებული</string>
+    <string name="settings_api_key_saved">გასაღები დაშიფრულად შენახულია</string>
+    <string name="settings_api_key_clear">გასაღების წაშლა</string>
+    <string name="settings_model">მოდელი</string>
+    <string name="settings_zdr_title">ნულოვანი მონაცემთა შენახვა (ZDR)</string>
+    <string name="settings_zdr_body">მოთხოვნები იგზავნება მკაცრი პრივატულობის სათაურებით და პროვაიდერის პარამეტრით „data_collection: deny“ — ტექსტი არ ინახება და არ გამოიყენება მოდელის წვრთნისთვის. ჩანაწერები რჩება მხოლოდ შენს მოწყობილობაზე.</string>
+    <string name="settings_data">მონაცემები</string>
+    <string name="settings_clear">ყველა ჩანაწერის წაშლა</string>
+    <string name="settings_clear_confirm">წავშალოთ ყველა ჩანაწერი? ამ მოქმედების დაბრუნება შეუძლებელია.</string>
+    <string name="settings_cleared">ყველა ჩანაწერი წაიშალა</string>
+    <string name="settings_show">ჩვენება</string>
+    <string name="settings_hide">დამალვა</string>
+    <string name="settings_version">ვერსია %1$s</string>
+
+    <!-- აქცენტის ფერები -->
+    <string name="accent_cyan">ცისფერი</string>
+    <string name="accent_green">მწვანე</string>
+    <string name="accent_amber">ქარვისფერი</string>
+    <string name="accent_purple">იისფერი</string>
+    <string name="accent_coral">მარჯნისფერი</string>
+
+    <!-- შეტყობინებები -->
+    <string name="notif_channel_name">დღიურის შეკითხვები</string>
+    <string name="notif_channel_desc">დღის განმავლობაში თანაბრად გაფანტული შეკითხვები დღიურისთვის</string>
+    <string name="notif_title">გონების დღიური</string>
+    <string name="notif_reply_hint">დაწერე პასუხი…</string>
+    <string name="notif_reply_action">პასუხი</string>
+    <string name="notif_saved">შენახულია ✓</string>
+    <string name="notif_error">შენახვა ვერ მოხერხდა</string>
+
+    <!-- საერთო -->
+    <string name="error_generic">დაფიქსირდა შეცდომა</string>
+    <string name="error_no_key">API გასაღები არ არის დამატებული</string>
+    <string name="error_no_entries">ანალიზისთვის ჩანაწერები არ არის</string>
+</resources>

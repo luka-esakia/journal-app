@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plain platform theme: the whole UI is Compose, so only the window chrome matters. -->
+    <style name="Theme.MindJournal" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/matte_background</item>
+        <item name="android:statusBarColor">@color/matte_background</item>
+        <item name="android:navigationBarColor">@color/matte_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
