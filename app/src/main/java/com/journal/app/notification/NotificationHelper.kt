@@ -47,6 +47,7 @@ object NotificationHelper {
     const val ACTION_SHOW_PROMPT = "com.journal.app.action.SHOW_PROMPT"
     const val ACTION_PLAN_DAY = "com.journal.app.action.PLAN_DAY"
     const val ACTION_INLINE_REPLY = "com.journal.app.action.INLINE_REPLY"
+    const val ACTION_REROLL_PROMPT = "com.journal.app.action.REROLL_PROMPT"
 
     const val EXTRA_PROMPT = "com.journal.app.extra.PROMPT"
     const val EXTRA_NOTIFICATION_ID = "com.journal.app.extra.NOTIFICATION_ID"
@@ -64,6 +65,7 @@ object NotificationHelper {
     private const val TAG = "NotificationHelper"
     private const val NOTIFICATION_ID_BASE = 2_000
     private const val PROMPT_REQUEST_BASE = 1_000
+    private const val REROLL_REQUEST_BASE = 50_000
     private const val PLANNER_REQUEST_CODE = 900
     private const val PLANNER_HOUR = 0
     private const val PLANNER_MINUTE = 5
@@ -72,16 +74,8 @@ object NotificationHelper {
     private const val SAVED_TIMEOUT_MILLIS = 25_000L
     private const val PLAN_WORK_NAME = "mind_journal_daily_plan"
 
-    /** Seed prompts: a mix of light/odd observation cues and honest reflective ones. */
-    val PROMPTS: List<String> = listOf(
-        // მსუბუქი და უცნაური
-        "აღწერე შენი გარემო 3 სიტყვით",
-        "რა უცნაური დეტალი შეამჩნიე დღეს?",
-        "რა საუნდტრეკი მოუხდებოდა ამ ზუსტ მომენტს?",
-        // ნამდვილი და რეფლექსიური
-        "რამ წაგართვა ენერგია დღეს?",
-        "რა არის 1 რამ, რასაც დღეს აკეთებ და მომავლის შენი თავი მადლობელი იქნება?"
-    )
+    /** The prompt pool. Lives in [PromptBank]; kept here as an alias for call-site brevity. */
+    val PROMPTS: List<String> get() = PromptBank.allPrompts
 
     /** One planned notification: when it fires and which prompt it carries. */
     data class ScheduledSlot(
@@ -380,9 +374,10 @@ object NotificationHelper {
 
     /**
      * Posts a prompt notification carrying a [RemoteInput] action, so the entry can be typed and
-     * saved from the banner or the lockscreen without ever opening the app.
+     * saved from the banner or the lockscreen without ever opening the app, plus a
+     * "🔄 შეცვლა" action that swaps the prompt in place.
      */
-    fun showPrompt(context: Context, prompt: String, notificationId: Int) {
+    fun showPromptNotification(context: Context, prompt: String, notificationId: Int) {
         createChannel(context)
 
         val replyLabel = context.getString(R.string.notif_reply_hint)
@@ -414,14 +409,47 @@ object NotificationHelper {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .build()
 
+        // Reroll: swaps the prompt without opening the app, so a question that doesn't land
+        // costs one tap instead of a dismissal.
+        val rerollIntent = Intent(context, NotificationReceiver::class.java).apply {
+            action = ACTION_REROLL_PROMPT
+            data = Uri.parse("mindjournal://reroll/$notificationId")
+            putExtra(EXTRA_PROMPT, prompt)
+            putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+        }
+        val rerollPending = PendingIntent.getBroadcast(
+            context,
+            REROLL_REQUEST_BASE + notificationId,
+            rerollIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val rerollAction = NotificationCompat.Action.Builder(
+            R.drawable.ic_notification,
+            context.getString(R.string.notif_reroll_action),
+            rerollPending
+        )
+            .setAllowGeneratedReplies(false)
+            .build()
+
         val notification = baseBuilder(context, notificationId)
             .setContentTitle(prompt)
             .setContentText(context.getString(R.string.notif_reply_hint))
             .setStyle(NotificationCompat.BigTextStyle().bigText(prompt))
             .addAction(replyAction)
+            .addAction(rerollAction)
             .build()
 
         post(context, notificationId, notification)
+    }
+
+    /**
+     * Replaces the visible notification with a fresh prompt. Cancels first so the re-post
+     * re-alerts rather than silently updating a notification the user is already looking past.
+     */
+    fun rerollPrompt(context: Context, notificationId: Int, currentPrompt: String?) {
+        cancel(context, notificationId)
+        val next = PromptBank.randomOtherThan(currentPrompt)
+        showPromptNotification(context, next, notificationId)
     }
 
     /**

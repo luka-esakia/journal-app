@@ -1,11 +1,14 @@
 package com.journal.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,14 +23,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journal.app.BuildConfig
 import com.journal.app.R
+import com.journal.app.data.export.JournalExporter
+import com.journal.app.data.local.AiSettings
 import com.journal.app.ui.JournalViewModel
 import com.journal.app.ui.components.SectionCard
 import com.journal.app.ui.theme.AccentColor
@@ -61,7 +73,14 @@ import com.journal.app.ui.theme.OnAccent
 import com.journal.app.ui.theme.TextSecondary
 import com.journal.app.ui.theme.TextTertiary
 
-/** API key (encrypted at rest), model, AI toggle, accent palette and destructive data actions. */
+/**
+ * API key (encrypted at rest), model picker, cost routing, accent palette, export, and the
+ * destructive data action.
+ *
+ * Everything in the AI block is a *draft* until the explicit save button at the bottom of that
+ * card is pressed — the previous inline check-icon affordances were easy to miss, which made
+ * edits look applied when they had never been persisted.
+ */
 @Composable
 fun SettingsScreen(
     viewModel: JournalViewModel,
@@ -73,7 +92,23 @@ fun SettingsScreen(
     var keyDraft by rememberSaveable(aiSettings.apiKey) { mutableStateOf(aiSettings.apiKey) }
     var keyVisible by rememberSaveable { mutableStateOf(false) }
     var modelDraft by rememberSaveable(aiSettings.model) { mutableStateOf(aiSettings.model) }
+    var lowPriorityDraft by rememberSaveable(aiSettings.lowPriority) {
+        mutableStateOf(aiSettings.lowPriority)
+    }
+    var customSlug by rememberSaveable { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
+
+    val dirty = keyDraft != aiSettings.apiKey ||
+        modelDraft != aiSettings.model ||
+        lowPriorityDraft != aiSettings.lowPriority
+
+    val exportJson = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(JournalExporter.JSON_MIME)
+    ) { uri -> uri?.let { viewModel.exportTo(it, asJson = true) } }
+
+    val exportMarkdown = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(JournalExporter.MARKDOWN_MIME)
+    ) { uri -> uri?.let { viewModel.exportTo(it, asJson = false) } }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -118,12 +153,7 @@ fun SettingsScreen(
                     Switch(
                         checked = aiSettings.enabled,
                         onCheckedChange = viewModel::setAiEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            uncheckedTrackColor = CardSurface,
-                            uncheckedBorderColor = TextTertiary
-                        )
+                        colors = journalSwitchColors()
                     )
                 }
 
@@ -188,64 +218,49 @@ fun SettingsScreen(
                     color = TextTertiary
                 )
 
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.saveApiKey(keyDraft) },
-                        enabled = keyDraft != aiSettings.apiKey,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                            disabledContentColor = TextTertiary
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.action_save))
-                    }
-                    if (aiSettings.apiKey.isNotBlank()) {
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.clearApiKey()
-                                keyDraft = ""
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Text(stringResource(R.string.settings_api_key_clear))
-                        }
-                    }
-                }
-
                 Spacer(Modifier.height(18.dp))
 
+                // ------------------------------------------------ model picker
+                Text(
+                    text = stringResource(R.string.settings_model_choose),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(8.dp))
+                ModelPicker(
+                    settings = aiSettings,
+                    selectedSlug = modelDraft,
+                    onSelect = { modelDraft = it },
+                    onRemoveCustom = viewModel::removeCustomModel
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 OutlinedTextField(
-                    value = modelDraft,
-                    onValueChange = { modelDraft = it },
+                    value = customSlug,
+                    onValueChange = { customSlug = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.settings_model)) },
+                    label = { Text(stringResource(R.string.settings_model_custom)) },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.settings_model_custom_hint),
+                            color = TextTertiary
+                        )
+                    },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     trailingIcon = {
-                        if (modelDraft != aiSettings.model) {
-                            IconButton(onClick = { viewModel.saveModel(modelDraft) }) {
+                        if (customSlug.isNotBlank()) {
+                            IconButton(onClick = {
+                                viewModel.addCustomModel(customSlug)
+                                modelDraft = customSlug.trim()
+                                customSlug = ""
+                            }) {
                                 Icon(
-                                    imageVector = Icons.Outlined.Check,
-                                    contentDescription = stringResource(R.string.action_save),
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = stringResource(R.string.settings_model_add),
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -253,6 +268,84 @@ fun SettingsScreen(
                         }
                     }
                 )
+
+                Spacer(Modifier.height(18.dp))
+
+                // --------------------------------------------- cost routing
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.settings_low_priority),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = lowPriorityDraft,
+                        onCheckedChange = { lowPriorityDraft = it },
+                        colors = journalSwitchColors()
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_low_priority_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary
+                )
+
+                Spacer(Modifier.height(18.dp))
+
+                // ------------------------------------------------ save block
+                if (dirty) {
+                    Text(
+                        text = stringResource(R.string.settings_unsaved),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                Button(
+                    onClick = {
+                        viewModel.saveAiSettings(keyDraft, modelDraft, lowPriorityDraft)
+                    },
+                    enabled = dirty,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        disabledContentColor = TextTertiary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_save_all),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+
+                if (aiSettings.apiKey.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            viewModel.clearApiKey()
+                            keyDraft = ""
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_api_key_clear),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
         }
 
@@ -264,6 +357,70 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
+            }
+        }
+
+        // ------------------------------------------------------------ export
+        item {
+            SectionCard(title = stringResource(R.string.settings_export)) {
+                Text(
+                    text = stringResource(R.string.settings_export_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { exportJson.launch(viewModel.suggestedExportName(asJson = true)) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FileDownload,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.settings_export_json),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            exportMarkdown.launch(viewModel.suggestedExportName(asJson = false))
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, TextTertiary.copy(alpha = 0.6f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.settings_export_md),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
         }
 
@@ -335,6 +492,123 @@ fun SettingsScreen(
         )
     }
 }
+
+/**
+ * Dropdown over the curated models plus any the user added. Prices are shown inline because the
+ * whole point of choosing is the cost tradeoff.
+ */
+@Composable
+private fun ModelPicker(
+    settings: AiSettings,
+    selectedSlug: String,
+    onSelect: (String) -> Unit,
+    onRemoveCustom: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = settings.availableModels()
+    val selected = options.firstOrNull { it.slug == selectedSlug }
+    val customSlugs = settings.customModels.toSet()
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                    RoundedCornerShape(12.dp)
+                )
+                .clickable { expanded = true }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = selected?.label ?: selectedSlug,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = selected?.let { "${it.slug} · ${it.price}" } ?: selectedSlug,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary
+                )
+            }
+            Icon(
+                imageVector = Icons.Outlined.UnfoldMore,
+                contentDescription = stringResource(R.string.settings_model_choose),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(CardSurface)
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    onClick = {
+                        onSelect(option.slug)
+                        expanded = false
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (option.slug == selectedSlug) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            Text(
+                                text = "${option.price} / 1M",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextTertiary
+                            )
+                            option.note?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        if (option.slug in customSlugs) {
+                            IconButton(onClick = {
+                                onRemoveCustom(option.slug)
+                                expanded = false
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(
+                                        R.string.settings_model_remove
+                                    ),
+                                    tint = TextTertiary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun journalSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+    checkedTrackColor = MaterialTheme.colorScheme.primary,
+    uncheckedTrackColor = CardSurface,
+    uncheckedBorderColor = TextTertiary
+)
 
 @Composable
 private fun AccentSwatch(

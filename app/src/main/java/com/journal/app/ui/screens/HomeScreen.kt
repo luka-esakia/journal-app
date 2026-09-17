@@ -20,12 +20,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Casino
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -67,6 +71,7 @@ fun HomeScreen(
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val quickPrompt by viewModel.quickAddPrompt.collectAsStateWithLifecycle()
+    val promptLoading by viewModel.promptLoading.collectAsStateWithLifecycle()
 
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
@@ -113,9 +118,12 @@ fun HomeScreen(
         ) {
             QuickAddSheet(
                 prompt = quickPrompt,
+                promptLoading = promptLoading,
                 draft = draft,
                 onDraftChange = { draft = it },
-                onShuffle = viewModel::shufflePrompt,
+                onPickFromBank = viewModel::pickPromptFromBank,
+                onGenerateAi = viewModel::generateAiPrompt,
+                onClearPrompt = viewModel::clearPrompt,
                 onCancel = {
                     sheetOpen = false
                     draft = ""
@@ -247,12 +255,20 @@ private fun EmptyTimeline(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Quick-add. The entry itself is the whole point, so the sheet opens with **no prompt** and an
+ * empty body. A prompt is opt-in: 🎲 draws one from the local bank (free, instant), ✨ asks the
+ * LLM for one informed by recent topics.
+ */
 @Composable
 private fun QuickAddSheet(
-    prompt: String,
+    prompt: String?,
+    promptLoading: Boolean,
     draft: String,
     onDraftChange: (String) -> Unit,
-    onShuffle: () -> Unit,
+    onPickFromBank: () -> Unit,
+    onGenerateAi: () -> Unit,
+    onClearPrompt: () -> Unit,
     onCancel: () -> Unit,
     onSave: () -> Unit
 ) {
@@ -263,31 +279,71 @@ private fun QuickAddSheet(
             .navigationBarsPadding()
             .padding(horizontal = 20.dp, vertical = 20.dp)
     ) {
-        Text(
-            text = stringResource(R.string.dialog_new_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(verticalAlignment = Alignment.Top) {
-            Icon(
-                imageVector = Icons.Outlined.AutoAwesome,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(top = 3.dp)
-                    .size(16.dp)
-            )
-            Spacer(Modifier.width(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = prompt,
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.primary,
+                text = stringResource(R.string.dialog_new_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = onPickFromBank, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    imageVector = Icons.Outlined.Casino,
+                    contentDescription = stringResource(R.string.dialog_prompt_bank),
+                    tint = TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(
+                onClick = onGenerateAi,
+                enabled = !promptLoading,
+                modifier = Modifier.size(38.dp)
+            ) {
+                if (promptLoading) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = stringResource(R.string.dialog_prompt_ai),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        if (prompt == null) {
+            Text(
+                text = stringResource(R.string.dialog_no_prompt),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextTertiary
+            )
+        } else {
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    text = prompt,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontStyle = FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = 6.dp)
+                )
+                IconButton(onClick = onClearPrompt, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.dialog_prompt_remove),
+                        tint = TextTertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -318,12 +374,6 @@ private fun QuickAddSheet(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onShuffle) {
-                Text(
-                    text = stringResource(R.string.action_shuffle),
-                    color = TextSecondary
-                )
-            }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onCancel) {
                 Text(

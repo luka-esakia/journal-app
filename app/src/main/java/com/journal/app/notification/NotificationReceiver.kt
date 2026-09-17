@@ -24,6 +24,8 @@ class NotificationReceiver : BroadcastReceiver() {
         when (val action = intent.action) {
             NotificationHelper.ACTION_SHOW_PROMPT -> showPrompt(context, intent)
 
+            NotificationHelper.ACTION_REROLL_PROMPT -> reroll(context, intent)
+
             NotificationHelper.ACTION_PLAN_DAY -> planAsync(context, "planner alarm")
 
             Intent.ACTION_BOOT_COMPLETED,
@@ -62,10 +64,24 @@ class NotificationReceiver : BroadcastReceiver() {
         )
         val prompt = intent.getStringExtra(NotificationHelper.EXTRA_PROMPT)
             ?.takeIf { it.isNotBlank() }
-            ?: NotificationHelper.PROMPTS.random()
+            ?: PromptBank.random()
 
         Log.i(TAG, "Showing prompt for slot $slotIndex")
-        NotificationHelper.showPrompt(context, prompt, notificationId)
+        NotificationHelper.showPromptNotification(context, prompt, notificationId)
+    }
+
+    /**
+     * "🔄 შეცვლა" — swap the prompt for a different one, in place, without opening the app.
+     * Synchronous: no storage or preference reads, just a draw from the in-memory bank.
+     */
+    private fun reroll(context: Context, intent: Intent) {
+        val notificationId = intent.getIntExtra(
+            NotificationHelper.EXTRA_NOTIFICATION_ID,
+            DEFAULT_NOTIFICATION_ID
+        )
+        val current = intent.getStringExtra(NotificationHelper.EXTRA_PROMPT)
+        Log.i(TAG, "Rerolling prompt for notification $notificationId")
+        NotificationHelper.rerollPrompt(context, notificationId, current)
     }
 
     companion object {

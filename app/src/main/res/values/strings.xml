@@ -22,12 +22,15 @@
     <string name="dialog_hint">დაიწყე წერა…</string>
     <string name="action_save">შენახვა</string>
     <string name="action_cancel">გაუქმება</string>
-    <string name="action_shuffle">სხვა შეკითხვა</string>
     <string name="action_delete">წაშლა</string>
     <string name="action_ok">კარგი</string>
     <string name="entry_saved">ჩანაწერი შენახულია</string>
     <string name="entry_deleted">ჩანაწერი წაიშალა</string>
     <string name="source_notification">შეტყობინებიდან</string>
+    <string name="dialog_prompt_bank">შეკითხვა ბანკიდან</string>
+    <string name="dialog_prompt_ai">AI შეკითხვა</string>
+    <string name="dialog_prompt_remove">შეკითხვის მოშორება</string>
+    <string name="dialog_no_prompt">შეკითხვის გარეშე — უბრალოდ დაწერე</string>
 
     <!-- ანალიზის ეკრანი -->
     <string name="insights_title">ანალიზი</string>
@@ -52,8 +55,8 @@
     <string name="config_enabled">შეტყობინებები აქტიურია</string>
     <string name="config_count">შეტყობინება დღეში: %1$d</string>
     <string name="config_window">დროის ფანჯარა</string>
-    <string name="config_start">დაწყება: %1$s</string>
-    <string name="config_end">დასრულება: %1$s</string>
+    <string name="config_start_label">დაწყება</string>
+    <string name="config_end_label">დასრულება</string>
     <string name="config_chunk">ერთი ნაწილი ≈ %1$d წუთი</string>
     <string name="config_preview">დღევანდელი გრაფიკის მაგალითი</string>
     <string name="config_save">გრაფიკის შენახვა</string>
@@ -73,9 +76,7 @@
     <string name="settings_api_key_hint">sk-or-v1-…</string>
     <string name="settings_api_key_stored">გასაღები დაშიფრულად ინახება მოწყობილობაზე</string>
     <string name="settings_api_key_empty">გასაღები არ არის დამატებული</string>
-    <string name="settings_api_key_saved">გასაღები დაშიფრულად შენახულია</string>
     <string name="settings_api_key_clear">გასაღების წაშლა</string>
-    <string name="settings_model">მოდელი</string>
     <string name="settings_zdr_title">ნულოვანი მონაცემთა შენახვა (ZDR)</string>
     <string name="settings_zdr_body">მოთხოვნები იგზავნება მკაცრი პრივატულობის სათაურებით და პროვაიდერის პარამეტრით „data_collection: deny“ — ტექსტი არ ინახება და არ გამოიყენება მოდელის წვრთნისთვის. ჩანაწერები რჩება მხოლოდ შენს მოწყობილობაზე.</string>
     <string name="settings_data">მონაცემები</string>
@@ -85,6 +86,26 @@
     <string name="settings_show">ჩვენება</string>
     <string name="settings_hide">დამალვა</string>
     <string name="settings_version">ვერსია %1$s</string>
+    <string name="settings_saved">პარამეტრები შენახულია ✓</string>
+    <string name="settings_save_all">პარამეტრების შენახვა</string>
+    <string name="settings_api_key_cleared">გასაღები წაიშალა</string>
+    <string name="settings_model_choose">აირჩიე მოდელი</string>
+    <string name="settings_model_custom">სხვა მოდელი (OpenRouter slug)</string>
+    <string name="settings_model_custom_hint">provider/model-name</string>
+    <string name="settings_model_add">სიაში დამატება</string>
+    <string name="settings_model_added">მოდელი დაემატა სიაში</string>
+    <string name="settings_model_remove">წაშლა სიიდან</string>
+    <string name="settings_low_priority">დაბალი პრიორიტეტი (იაფი რეჟიმი)</string>
+    <string name="settings_low_priority_hint">მოთხოვნას ემატება „:floor“ და „sort: price“ — OpenRouter ირჩევს ყველაზე იაფ მარშრუტს და flex რიგს. ფასი მნიშვნელოვნად ეცემა, პასუხი ოდნავ ნელია.</string>
+    <string name="settings_unsaved">შენახული არ არის</string>
+
+    <!-- ექსპორტი -->
+    <string name="settings_export">ექსპორტი</string>
+    <string name="settings_export_hint">JSON — სრული backup (ყველა თეგი, დრო, შეკითხვა; მომავალში იმპორტისთვის). Markdown — წასაკითხი ვერსია, იხსნება ყველგან.</string>
+    <string name="settings_export_json">JSON backup</string>
+    <string name="settings_export_md">Markdown</string>
+    <string name="settings_export_done">%1$d ჩანაწერი გატანილია ✓</string>
+    <string name="settings_export_failed">ექსპორტი ვერ მოხერხდა</string>
 
     <!-- აქცენტის ფერები -->
     <string name="accent_cyan">ცისფერი</string>
@@ -99,6 +120,7 @@
     <string name="notif_title">გონების დღიური</string>
     <string name="notif_reply_hint">დაწერე პასუხი…</string>
     <string name="notif_reply_action">პასუხი</string>
+    <string name="notif_reroll_action">🔄 შეცვლა</string>
     <string name="notif_saved">შენახულია ✓</string>
     <string name="notif_error">შენახვა ვერ მოხერხდა</string>
 

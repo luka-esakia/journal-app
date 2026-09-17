@@ -110,37 +110,39 @@ fun InsightsScreen(
                     TagCloud(tagCounts = tagCounts)
                 }
 
+                // Always rendered and always pressable: a disabled button is indistinguishable
+                // from a broken one, so let the press happen and explain the failure instead.
+                Spacer(Modifier.height(14.dp))
                 if (pending > 0) {
-                    Spacer(Modifier.height(14.dp))
                     Text(
                         text = stringResource(R.string.insights_pending, pending),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextTertiary
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = viewModel::analyzePending,
-                        enabled = aiUsable && !busy,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(R.string.insights_analyze),
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
+                }
+                OutlinedButton(
+                    onClick = viewModel::analyzePending,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.insights_analyze),
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             }
         }
@@ -175,7 +177,7 @@ fun InsightsScreen(
 
                 Button(
                     onClick = viewModel::generateWeeklyReflection,
-                    enabled = aiUsable && !busy,
+                    enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),

@@ -146,6 +146,30 @@ class JournalRepository private constructor(
         return Result.success(tagged)
     }
 
+    /**
+     * Asks the LLM for one fresh Georgian prompt, slanted toward the user's recent topics.
+     * Returns a failure (rather than a bank fallback) so the UI can explain why it didn't work.
+     */
+    suspend fun generatePrompt(): Result<String> {
+        val settings = prefs.currentAiSettings()
+        if (!settings.isUsable()) {
+            return Result.failure(OpenRouterException("missing api key"))
+        }
+        val recentTags = withContext(Dispatchers.IO) {
+            dao.latest(RECENT_FOR_PROMPT)
+                .flatMap { it.tagList() }
+                .groupingBy { it }
+                .eachCount()
+                .entries
+                .sortedByDescending { it.value }
+                .map { it.key }
+        }
+        return client.generatePrompt(settings, recentTags).mapCatching { prompt ->
+            prompt.takeIf { it.isNotBlank() }
+                ?: throw OpenRouterException("empty completion")
+        }
+    }
+
     /** Generates and persists the weekly reflection over the trailing seven days. */
     suspend fun generateWeeklyReflection(now: Long = System.currentTimeMillis()): Result<String> {
         val settings = prefs.currentAiSettings()
@@ -193,6 +217,7 @@ class JournalRepository private constructor(
     companion object {
         private const val TAG = "JournalRepository"
         private const val PENDING_BATCH = 15
+        private const val RECENT_FOR_PROMPT = 25
         private val DATE_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMM", Locale("ka", "GE"))
 

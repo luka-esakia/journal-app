@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -233,18 +235,14 @@ fun NotificationConfigScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TimeButton(
-                        label = stringResource(
-                            R.string.config_start,
-                            formatMinuteOfDay(draft.startMinuteOfDay)
-                        ),
+                        label = stringResource(R.string.config_start_label),
+                        value = formatMinuteOfDay(draft.startMinuteOfDay),
                         onClick = { editing = TimeField.START },
                         modifier = Modifier.weight(1f)
                     )
                     TimeButton(
-                        label = stringResource(
-                            R.string.config_end,
-                            formatMinuteOfDay(draft.endMinuteOfDay)
-                        ),
+                        label = stringResource(R.string.config_end_label),
+                        value = formatMinuteOfDay(draft.endMinuteOfDay),
                         onClick = { editing = TimeField.END },
                         modifier = Modifier.weight(1f)
                     )
@@ -329,22 +327,50 @@ fun NotificationConfigScreen(
 
 private enum class TimeField { START, END }
 
+/**
+ * Label above, time below.
+ *
+ * The previous single-line version ("დაწყება: 10:00") wrapped to two lines inside a half-width
+ * column and was then clipped by a fixed 48dp height. Stacking the two pieces keeps each on one
+ * line, and sizing by content — `defaultMinSize` rather than `height` — means Georgian descenders
+ * can never be cut off, whatever the font scale.
+ */
 @Composable
 private fun TimeButton(
     label: String,
+    value: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(48.dp),
+        modifier = modifier.defaultMinSize(minHeight = 56.dp),
         shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
             contentColor = MaterialTheme.colorScheme.primary
         )
     ) {
-        Text(text = label, style = MaterialTheme.typography.labelLarge)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1
+            )
+        }
     }
 }
 

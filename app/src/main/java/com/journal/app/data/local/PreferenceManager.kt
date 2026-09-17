@@ -32,16 +32,82 @@ data class NotificationConfig(
     }
 }
 
+/** One selectable model: an OpenRouter slug plus its list price, for display. */
+data class ModelOption(
+    val slug: String,
+    val label: String,
+    /** "$/Mtok in → out", shown so the cost tradeoff is visible at the point of choosing. */
+    val price: String,
+    val note: String? = null
+)
+
 /** LLM settings. [apiKey] is only ever read from encrypted storage. */
 data class AiSettings(
     val enabled: Boolean = true,
     val apiKey: String = "",
-    val model: String = DEFAULT_MODEL
+    val model: String = DEFAULT_MODEL,
+    /**
+     * Routes requests at the cheapest/flex service tier (`:floor` + `provider.sort = price`).
+     * On by default: journal tagging is never latency-critical.
+     */
+    val lowPriority: Boolean = true,
+    /** Extra slugs the user typed in, persisted so they stay in the picker. */
+    val customModels: List<String> = emptyList()
 ) {
     fun isUsable(): Boolean = enabled && apiKey.isNotBlank()
 
+    /** Curated list plus whatever the user added, de-duplicated, curated first. */
+    fun availableModels(): List<ModelOption> {
+        val curatedSlugs = CURATED_MODELS.map { it.slug }.toSet()
+        val extras = customModels
+            .filter { it.isNotBlank() && it !in curatedSlugs }
+            .map { ModelOption(slug = it, label = it, price = "—") }
+        return CURATED_MODELS + extras
+    }
+
     companion object {
-        const val DEFAULT_MODEL = "anthropic/claude-3.5-haiku"
+        /**
+         * Default model. Verified against OpenRouter's live catalogue — the previously shipped
+         * `anthropic/claude-3.5-haiku` is not a valid slug there, which is why every AI action
+         * failed with a 404.
+         */
+        const val DEFAULT_MODEL = "anthropic/claude-haiku-4.5"
+
+        /**
+         * Short, inexpensive, and verified present in OpenRouter's catalogue. Ordering is by
+         * Georgian-language quality rather than by price: Mkhedruli is low-resource, and the
+         * cheapest open models degrade noticeably on it.
+         */
+        val CURATED_MODELS: List<ModelOption> = listOf(
+            ModelOption(
+                slug = "anthropic/claude-haiku-4.5",
+                label = "Claude Haiku 4.5",
+                price = "$1.00 → $5.00",
+                note = "ქართულისთვის საუკეთესო ბალანსი"
+            ),
+            ModelOption(
+                slug = "google/gemini-2.5-flash",
+                label = "Gemini 2.5 Flash",
+                price = "$0.30 → $2.50"
+            ),
+            ModelOption(
+                slug = "openai/gpt-5-mini",
+                label = "GPT-5 mini",
+                price = "$0.25 → $2.00"
+            ),
+            ModelOption(
+                slug = "openai/gpt-4o-mini",
+                label = "GPT-4o mini",
+                price = "$0.15 → $0.60",
+                note = "ყველაზე იაფი სანდო ვარიანტი"
+            ),
+            ModelOption(
+                slug = "mistralai/mistral-small-3.2-24b-instruct",
+                label = "Mistral Small 3.2",
+                price = "$0.09 → $0.25",
+                note = "ულტრა-იაფი; ქართული სუსტდება"
+            )
+        )
     }
 }
 
@@ -107,20 +173,68 @@ class PreferenceManager private constructor(context: Context) {
 
     fun currentAiSettings(): AiSettings = _aiSettings.value
 
+    /**
+     * Commits the whole AI block in one write — the key, the model, and the routing flag.
+     *
+     * The previous per-field setters were only reachable from small inline affordances that were
+     * easy to miss, so edits looked applied but were never persisted. One explicit save avoids
+     * that entire class of bug.
+     */
+    fun saveAiSettings(apiKey: String, model: String, lowPriority: Boolean) {
+        val trimmedKey = apiKey.trim()
+        val trimmedModel = model.trim().ifEmpty { AiSettings.DEFAULT_MODEL }
+        prefs.edit()
+            .putString(KEY_API_KEY, trimmedKey)
+            .putString(KEY_MODEL, trimmedModel)
+            .putBoolean(KEY_LOW_PRIORITY, lowPriority)
+            .apply()
+        _aiSettings.value = _aiSettings.value.copy(
+            apiKey = trimmedKey,
+            model = trimmedModel,
+            lowPriority = lowPriority
+        )
+    }
+
     fun saveApiKey(key: String) {
         prefs.edit().putString(KEY_API_KEY, key.trim()).apply()
         _aiSettings.value = _aiSettings.value.copy(apiKey = key.trim())
     }
 
-    fun saveModel(model: String) {
-        val value = model.trim().ifEmpty { AiSettings.DEFAULT_MODEL }
-        prefs.edit().putString(KEY_MODEL, value).apply()
-        _aiSettings.value = _aiSettings.value.copy(model = value)
-    }
-
     fun setAiEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AI_ENABLED, enabled).apply()
         _aiSettings.value = _aiSettings.value.copy(enabled = enabled)
+    }
+
+    fun setLowPriority(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LOW_PRIORITY, enabled).apply()
+        _aiSettings.value = _aiSettings.value.copy(lowPriority = enabled)
+    }
+
+    /** Adds a hand-typed slug to the picker and persists it. No-op for duplicates. */
+    fun addCustomModel(slug: String) {
+        val value = slug.trim()
+        if (value.isEmpty()) return
+        val current = _aiSettings.value
+        if (value in current.customModels ||
+            AiSettings.CURATED_MODELS.any { it.slug == value }
+        ) {
+            return
+        }
+        val updated = current.customModels + value
+        prefs.edit().putStringSet(KEY_CUSTOM_MODELS, updated.toSet()).apply()
+        _aiSettings.value = current.copy(customModels = updated)
+    }
+
+    fun removeCustomModel(slug: String) {
+        val current = _aiSettings.value
+        val updated = current.customModels.filterNot { it == slug }
+        if (updated.size == current.customModels.size) return
+        prefs.edit().putStringSet(KEY_CUSTOM_MODELS, updated.toSet()).apply()
+        _aiSettings.value = current.copy(
+            customModels = updated,
+            // Never leave the picker pointing at a slug that no longer exists.
+            model = if (current.model == slug) AiSettings.DEFAULT_MODEL else current.model
+        )
     }
 
     // ----------------------------------------------------------- reflection
@@ -147,11 +261,21 @@ class PreferenceManager private constructor(context: Context) {
         dailyCount = prefs.getInt(KEY_DAILY_COUNT, 5)
     )
 
-    private fun readAiSettings() = AiSettings(
-        enabled = prefs.getBoolean(KEY_AI_ENABLED, true),
-        apiKey = prefs.getString(KEY_API_KEY, null).orEmpty(),
-        model = prefs.getString(KEY_MODEL, null) ?: AiSettings.DEFAULT_MODEL
-    )
+    private fun readAiSettings(): AiSettings {
+        val stored = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }
+        return AiSettings(
+            enabled = prefs.getBoolean(KEY_AI_ENABLED, true),
+            apiKey = prefs.getString(KEY_API_KEY, null).orEmpty(),
+            // Retired slugs (notably the old `anthropic/claude-3.5-haiku`) would otherwise
+            // persist forever and 404 on every request.
+            model = stored?.takeUnless { it in RETIRED_MODELS } ?: AiSettings.DEFAULT_MODEL,
+            lowPriority = prefs.getBoolean(KEY_LOW_PRIORITY, true),
+            customModels = prefs.getStringSet(KEY_CUSTOM_MODELS, null)
+                ?.filter { it.isNotBlank() }
+                ?.sorted()
+                .orEmpty()
+        )
+    }
 
     private fun readReflection(): WeeklyReflection? {
         val text = prefs.getString(KEY_REFLECTION, null) ?: return null
@@ -171,6 +295,14 @@ class PreferenceManager private constructor(context: Context) {
         private const val KEY_API_KEY = "openrouter_api_key"
         private const val KEY_MODEL = "openrouter_model"
         private const val KEY_AI_ENABLED = "ai_enabled"
+        private const val KEY_LOW_PRIORITY = "openrouter_low_priority"
+        private const val KEY_CUSTOM_MODELS = "openrouter_custom_models"
+
+        /** Slugs that no longer resolve on OpenRouter; migrated to the default on read. */
+        private val RETIRED_MODELS = setOf(
+            "anthropic/claude-3.5-haiku",
+            "anthropic/claude-3-5-haiku"
+        )
         private const val KEY_REFLECTION = "weekly_reflection"
         private const val KEY_REFLECTION_AT = "weekly_reflection_at"
 

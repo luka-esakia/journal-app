@@ -90,6 +90,37 @@ class OpenRouterClient private constructor() {
         ).map { it.trim() }
     }
 
+    /**
+     * Generates one fresh Georgian journaling question, optionally slanted toward the topics the
+     * user has actually been writing about.
+     */
+    suspend fun generatePrompt(
+        settings: AiSettings,
+        recentTags: List<String>
+    ): Result<String> {
+        val user = if (recentTags.isEmpty()) {
+            "შექმენი ერთი ახალი შეკითხვა."
+        } else {
+            "ბოლო პერიოდის თემები: ${recentTags.take(8).joinToString(", ")}.\n" +
+                "შექმენი ერთი ახალი შეკითხვა, რომელიც ამ თემებს ნაზად ეხება."
+        }
+        return chat(
+            settings = settings,
+            systemPrompt = PROMPT_SYSTEM_PROMPT,
+            userPrompt = user,
+            maxTokens = 120,
+            temperature = 1.0
+        ).map { raw ->
+            // Models like to wrap the question in quotes or prefix it with a bullet.
+            raw.trim()
+                .lineSequence()
+                .firstOrNull { it.isNotBlank() }
+                .orEmpty()
+                .trim()
+                .trim('"', '“', '”', '„', '-', '•', '*', ' ')
+        }
+    }
+
     // --------------------------------------------------------------- internals
 
     private suspend fun chat(
@@ -104,7 +135,7 @@ class OpenRouterClient private constructor() {
         }
 
         val payload = JSONObject().apply {
-            put("model", settings.model.ifBlank { AiSettings.DEFAULT_MODEL })
+            put("model", resolveModel(settings))
             put("max_tokens", maxTokens)
             put("temperature", temperature)
             put(
@@ -114,12 +145,15 @@ class OpenRouterClient private constructor() {
                     put(message("user", userPrompt))
                 }
             )
-            // Zero-data-retention: refuse any provider that would log or train on the prompt.
             put(
                 "provider",
                 JSONObject().apply {
+                    // Zero-data-retention: refuse any provider that would log or train on this.
                     put("data_collection", "deny")
                     put("allow_fallbacks", true)
+                    // Cheapest eligible provider rather than the fastest. Paired with the
+                    // `:floor` slug below this is the documented low-priority/low-cost posture.
+                    if (settings.lowPriority) put("sort", "price")
                 }
             )
         }
@@ -137,7 +171,15 @@ class OpenRouterClient private constructor() {
             http.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    val detail = errorMessage(body) ?: "HTTP ${response.code}"
+                    // Surface the provider's own message plus the status — a bad model slug
+                    // returns 404 and is otherwise indistinguishable from a network failure.
+                    val detail = buildString {
+                        append(errorMessage(body) ?: "HTTP ${response.code}")
+                        append(" (HTTP ")
+                        append(response.code)
+                        append(')')
+                    }
+                    Log.w(TAG, "OpenRouter rejected the request: $detail")
                     return@withContext Result.failure(
                         OpenRouterException(detail, response.code)
                     )
@@ -156,6 +198,22 @@ class OpenRouterClient private constructor() {
             Log.e(TAG, "Unexpected OpenRouter failure", t)
             Result.failure(OpenRouterException(t.message ?: "unexpected error"))
         }
+    }
+
+    /**
+     * Applies the `:floor` variant suffix when low-priority mode is on.
+     *
+     * Per OpenRouter's provider-routing docs, `:floor` is "a superset of setting `provider.sort`
+     * to `price`" and additionally "makes flex service tier endpoints eligible" — i.e. the request
+     * is served at lower priority for materially less money, while staying synchronous. (The
+     * `:batch` variants are exactly half price but deliver asynchronously, which is why they are
+     * not used here — a journal prompt cannot wait hours for its tags.)
+     */
+    private fun resolveModel(settings: AiSettings): String {
+        val base = settings.model.trim().ifBlank { AiSettings.DEFAULT_MODEL }
+        if (!settings.lowPriority) return base
+        // Never stack variants: a slug the user typed with its own suffix is left alone.
+        return if (base.contains(':')) base else "$base$FLOOR_SUFFIX"
     }
 
     private fun message(role: String, content: String) = JSONObject().apply {
@@ -199,6 +257,9 @@ class OpenRouterClient private constructor() {
         private const val MAX_TAGS = 5
         private const val MAX_INPUT_CHARS = 2000
 
+        /** OpenRouter variant suffix: cheapest eligible route, flex service tier allowed. */
+        private const val FLOOR_SUFFIX = ":floor"
+
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         private val TAG_SYSTEM_PROMPT = """
@@ -218,6 +279,16 @@ class OpenRouterClient private constructor() {
             3. ერთი ნაზი, კონკრეტული შენიშვნა მომავალი კვირისთვის.
             წესები: არ დაასვამ დიაგნოზს, არ მოუწოდებ ცვლილებას მკაცრი ტონით, არ იმეორებ ჩანაწერებს პირდაპირ.
             ტონი: თბილი, პატივისცემით, მეორე პირში.
+        """.trimIndent()
+
+        private val PROMPT_SYSTEM_PROMPT = """
+            შენ ქმნი დღიურის შეკითხვებს ქართულ ენაზე.
+            წესები:
+            — დააბრუნე ზუსტად ერთი შეკითხვა, ერთ სტრიქონზე, ბრჭყალების გარეშე.
+            — შეკითხვა უნდა იყოს მოკლე (მაქსიმუმ 15 სიტყვა), ცოცხალი და სასაუბრო ტონით.
+            — მიმართე მეორე პირში ან პირველ პირში, როგორც შინაგანი კითხვა.
+            — არ გაიმეორო ბანალური ფორმულირებები („როგორ გრძნობ თავს?“).
+            — არ დაამატო შესავალი, ნუმერაცია ან განმარტება.
         """.trimIndent()
 
         @Volatile

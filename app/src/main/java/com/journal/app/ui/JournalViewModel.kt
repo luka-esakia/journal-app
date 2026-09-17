@@ -1,6 +1,7 @@
 package com.journal.app.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -13,14 +14,17 @@ import com.journal.app.data.local.JournalEntry
 import com.journal.app.data.local.NotificationConfig
 import com.journal.app.data.local.PreferenceManager
 import com.journal.app.data.local.WeeklyReflection
+import com.journal.app.data.export.JournalExporter
 import com.journal.app.data.repository.JournalRepository
 import com.journal.app.notification.NotificationHelper
+import com.journal.app.notification.PromptBank
 import com.journal.app.ui.theme.AccentColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -69,9 +73,17 @@ class JournalViewModel(
     private val _message = MutableStateFlow<UiMessage?>(null)
     val message: StateFlow<UiMessage?> = _message.asStateFlow()
 
-    /** Prompt shown in the quick-add sheet; reshuffled on demand. */
-    private val _quickAddPrompt = MutableStateFlow(NotificationHelper.PROMPTS.random())
-    val quickAddPrompt: StateFlow<String> = _quickAddPrompt.asStateFlow()
+    /**
+     * Prompt attached to the quick-add sheet. Starts **null**: an entry written from inside the
+     * app is just the entry — a prompt is something the user opts into, via the dice (bank) or
+     * the stars (AI) button.
+     */
+    private val _quickAddPrompt = MutableStateFlow<String?>(null)
+    val quickAddPrompt: StateFlow<String?> = _quickAddPrompt.asStateFlow()
+
+    /** True while the AI prompt button is waiting on the network. */
+    private val _promptLoading = MutableStateFlow(false)
+    val promptLoading: StateFlow<Boolean> = _promptLoading.asStateFlow()
 
     // ------------------------------------------------------------------ entries
 
@@ -80,7 +92,7 @@ class JournalViewModel(
         viewModelScope.launch {
             repository.addEntry(content = content, prompt = prompt)
             _message.value = UiMessage.Res(R.string.entry_saved)
-            shufflePrompt()
+            clearPrompt()
         }
     }
 
@@ -98,10 +110,31 @@ class JournalViewModel(
         }
     }
 
-    fun shufflePrompt() {
-        val current = _quickAddPrompt.value
-        val candidates = NotificationHelper.PROMPTS.filter { it != current }
-        _quickAddPrompt.value = candidates.randomOrNull() ?: current
+    /** 🎲 — draw a different prompt from the local bank. Free and instant. */
+    fun pickPromptFromBank() {
+        _quickAddPrompt.value = PromptBank.randomOtherThan(_quickAddPrompt.value)
+    }
+
+    /** ✨ — ask the LLM for a new prompt informed by recent topics. Falls back to the bank. */
+    fun generateAiPrompt() {
+        if (_promptLoading.value) return
+        viewModelScope.launch {
+            _promptLoading.value = true
+            val result = repository.generatePrompt()
+            _promptLoading.value = false
+            result.fold(
+                onSuccess = { _quickAddPrompt.value = it },
+                onFailure = { error ->
+                    // Still give the user a prompt — just from the bank, and say why.
+                    _quickAddPrompt.value = PromptBank.randomOtherThan(_quickAddPrompt.value)
+                    _message.value = toMessage(error)
+                }
+            )
+        }
+    }
+
+    fun clearPrompt() {
+        _quickAddPrompt.value = null
     }
 
     fun entriesThisWeek(): Int = repository.countThisWeek(entries.value)
@@ -134,16 +167,61 @@ class JournalViewModel(
 
     fun setAccent(accent: AccentColor) = preferences.setAccentKey(accent.name)
 
-    fun saveApiKey(key: String) {
-        preferences.saveApiKey(key)
-        _message.value = UiMessage.Res(R.string.settings_api_key_saved)
+    /** The single explicit save for the whole AI block. */
+    fun saveAiSettings(apiKey: String, model: String, lowPriority: Boolean) {
+        preferences.saveAiSettings(apiKey, model, lowPriority)
+        _message.value = UiMessage.Res(R.string.settings_saved)
     }
 
-    fun clearApiKey() = preferences.saveApiKey("")
-
-    fun saveModel(model: String) = preferences.saveModel(model)
+    fun clearApiKey() {
+        preferences.saveApiKey("")
+        _message.value = UiMessage.Res(R.string.settings_api_key_cleared)
+    }
 
     fun setAiEnabled(enabled: Boolean) = preferences.setAiEnabled(enabled)
+
+    fun addCustomModel(slug: String) {
+        preferences.addCustomModel(slug)
+        _message.value = UiMessage.Res(R.string.settings_model_added)
+    }
+
+    fun removeCustomModel(slug: String) = preferences.removeCustomModel(slug)
+
+    // ----------------------------------------------------------------- export
+
+    /** Writes the journal to a user-chosen document via the Storage Access Framework. */
+    fun exportTo(uri: Uri, asJson: Boolean) {
+        viewModelScope.launch {
+            val entries = repository.entries.first()
+            if (entries.isEmpty()) {
+                _message.value = UiMessage.Res(R.string.error_no_entries)
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            val payload = if (asJson) {
+                JournalExporter.toJson(entries, now)
+            } else {
+                JournalExporter.toMarkdown(entries, now)
+            }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    app.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(payload.toByteArray(Charsets.UTF_8))
+                    } ?: error("could not open $uri for writing")
+                }
+            }
+            _message.value = result.fold(
+                onSuccess = { UiMessage.Res(R.string.settings_export_done, entries.size) },
+                onFailure = { UiMessage.Res(R.string.settings_export_failed) }
+            )
+        }
+    }
+
+    fun suggestedExportName(asJson: Boolean): String =
+        JournalExporter.suggestedFileName(
+            extension = if (asJson) "json" else "md",
+            now = System.currentTimeMillis()
+        )
 
     // ---------------------------------------------------------------- insights
 

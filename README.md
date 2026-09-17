@@ -29,10 +29,15 @@ Scheduling itself:
 - `NotificationReceiver` re-plans after boot, package replacement and time/timezone changes
 - a 12-hour `WorkManager` job as a safety net against OEM battery managers dropping alarms
 
-Covered by `app/src/test/java/.../NotificationHelperTest.kt` (one slot per chunk, strictly
-increasing, no clustering, midnight wrap, window bounds).
+Prompts come from [PromptBank](app/src/main/java/com/journal/app/notification/PromptBank.kt) — 14
+conversational Georgian questions in four groups (ზრდა / კრეატივი / ფოკუსი / უცნაური). A day draws
+from a shuffled bag, so with a 12-slot daily maximum a question never repeats within a day.
 
-### 2. Inline lockscreen replies — `notification/InlineReplyReceiver.kt`
+Covered by `app/src/test/java/.../NotificationHelperTest.kt` (one slot per chunk, strictly
+increasing, no clustering, midnight wrap, window bounds), `PromptBankTest.kt` (bank integrity,
+reroll never repeats), and `JournalExporterTest.kt` (export round-trip fidelity).
+
+### 2. Inline lockscreen replies + reroll — `notification/InlineReplyReceiver.kt`
 
 The prompt notification carries a `RemoteInput` action with a **mutable** `PendingIntent` and
 `VISIBILITY_PUBLIC`, so the text field is usable on the lockscreen. `InlineReplyReceiver` keeps the
@@ -40,6 +45,11 @@ broadcast alive with `goAsync()`, writes to Room off the main thread, then rebui
 notification as a quiet **„შენახულია ✓"** confirmation (with the saved text as reply history) that
 times out on its own. AI tagging is kicked off afterwards on the repository scope, so a failed
 network call never affects whether the entry was saved.
+
+A second action — **🔄 შეცვლა** — swaps the question for a different one in place. It cancels and
+re-posts the same notification id (so the new prompt re-alerts instead of silently updating), draws
+from [PromptBank](app/src/main/java/com/journal/app/notification/PromptBank.kt) with a
+guaranteed-different result, and never opens the app.
 
 ### 3. ZDR OpenRouter client — `data/remote/OpenRouterClient.kt`
 
@@ -49,12 +59,34 @@ Every request sends:
 Authorization: Bearer <key>          // read from EncryptedSharedPreferences
 HTTP-Referer:  https://github.com/mind-journal/android
 X-Title:       Mind Journal
-{ "provider": { "data_collection": "deny" } }
+{ "provider": { "data_collection": "deny", "sort": "price" } }
 ```
 
-Two calls are used: per-entry Georgian topic-tag extraction (`#მუშაობა`, `#დაღლილობა`, …) and a
-weekly reflection over the trailing seven days. Failures leave `analyzed = 0` so the entry is simply
-retried later.
+Three calls are used: per-entry Georgian topic-tag extraction (`#მუშაობა`, `#დაღლილობა`, …), a
+weekly reflection over the trailing seven days, and on-demand prompt generation for the quick-add
+sheet. Failures leave `analyzed = 0` so the entry is simply retried later.
+
+**Cost routing.** With low-priority mode on (the default), the model slug gets OpenRouter's
+`:floor` variant suffix and the request carries `provider.sort = "price"`. Per OpenRouter's
+provider-routing docs, `:floor` is "a superset of setting `provider.sort` to `price`" and
+additionally "makes flex service tier endpoints eligible" — cheapest route, lower priority, still
+synchronous. (The `:batch` variants are exactly half price but deliver asynchronously, so they are
+deliberately not used: a journal prompt can't wait hours for its tags.)
+
+**Models.** The picker ships five verified-present, inexpensive slugs, ordered by Georgian quality
+rather than price — Mkhedruli is low-resource and the cheapest open models degrade on it. Default
+is `anthropic/claude-haiku-4.5`. Own slugs can be typed in and are persisted into the list.
+
+### 4. Export — `data/export/JournalExporter.kt`
+
+Two formats, written through the Storage Access Framework (no storage permission):
+
+- **JSON** — the backup. Round-trips losslessly: ids, epoch-millis + ISO timestamps, prompt, AI
+  tags, source, analysis flag. The only format still readable if this app disappears.
+- **Markdown** — the reading copy, grouped by day, opens anywhere.
+
+Not CSV (entries are multi-line free text and every CSV consumer disagrees about embedded
+newlines); not a raw `.db` copy (opaque and schema-locked).
 
 ---
 
