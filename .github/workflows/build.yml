@@ -27,8 +27,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # The runner image already ships a licensed Android SDK, so there is nothing to install —
+      # just locate it, pin it in local.properties, and add the platform if the image lacks it.
+      - name: Configure Android SDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::No Android SDK found at $SDK"
+            exit 1
+          fi
+          echo "sdk.dir=$SDK" > local.properties
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+          echo "Installed platforms:"
+          ls "$SDK/platforms" || true
+
+          if [ ! -d "$SDK/platforms/android-34" ]; then
+            echo "android-34 missing — installing it with the preinstalled sdkmanager"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+              "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          fi
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
