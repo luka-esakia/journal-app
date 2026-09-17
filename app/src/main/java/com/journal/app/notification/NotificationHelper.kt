@@ -290,7 +290,9 @@ object NotificationHelper {
             .toInstant()
             .toEpochMilli()
 
-        val pending = plannerIntent(context, PendingIntent.FLAG_UPDATE_CURRENT)
+        // FLAG_UPDATE_CURRENT always creates, so this is non-null in practice; the elvis is only
+        // here because plannerIntent is shared with the FLAG_NO_CREATE cancellation path.
+        val pending = plannerIntent(context, PendingIntent.FLAG_UPDATE_CURRENT) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
             alarmManager.setWindow(AlarmManager.RTC_WAKEUP, trigger, INEXACT_WINDOW_MILLIS, pending)
         } else {
