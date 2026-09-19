@@ -5,6 +5,26 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+/**
+ * A stable signing key, when one is available.
+ *
+ * Android refuses to install an update whose signature differs from the installed app. CI
+ * generates a throwaway debug keystore on every runner, so each build was signed with a different
+ * key and every new APK had to be uninstalled first. Pointing both build types at one committed
+ * or CI-provisioned keystore makes updates install over the top, as they should.
+ */
+val sharedKeystore = rootProject.file("keystore/mindjournal.jks")
+val hasSharedKeystore = sharedKeystore.exists()
+
+/**
+ * Password used when none is supplied by the environment.
+ *
+ * This is a self-signed key for installing personal builds — it grants no publishing rights and
+ * protects nothing. A Play Store key must come from `KEYSTORE_PASSWORD` / `KEY_PASSWORD` and must
+ * never be committed.
+ */
+val DEFAULT_KEYSTORE_SECRET = "mindjournal"
+
 android {
     namespace = "com.journal.app"
     compileSdk = 34
@@ -13,18 +33,35 @@ android {
         applicationId = "com.journal.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         // The whole UI is Georgian; keep only the resources we actually ship.
         resourceConfigurations += setOf("ka", "en")
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (hasSharedKeystore) {
+            create("shared") {
+                // An unset GitHub secret still exports an *empty* env var, so blank must fall
+                // through to the default rather than being used as the password.
+                fun env(name: String, fallback: String): String =
+                    System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
+
+                storeFile = sharedKeystore
+                storePassword = env("KEYSTORE_PASSWORD", DEFAULT_KEYSTORE_SECRET)
+                keyAlias = env("KEY_ALIAS", "mindjournal")
+                keyPassword = env("KEY_PASSWORD", DEFAULT_KEYSTORE_SECRET)
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
+            if (hasSharedKeystore) signingConfig = signingConfigs.getByName("shared")
         }
         release {
             isMinifyEnabled = true
@@ -33,8 +70,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Debug signing so CI can produce an installable release APK without secrets.
-            signingConfig = signingConfigs.getByName("debug")
+            // Falls back to the ephemeral debug key so a fresh clone still builds; that build
+            // just won't be update-compatible with previous ones.
+            signingConfig = if (hasSharedKeystore) {
+                signingConfigs.getByName("shared")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
@@ -101,6 +143,10 @@ dependencies {
 
     // Encrypted preferences for the OpenRouter API key
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // App lock: biometrics with device PIN/pattern/password fallback.
+    // Pulls in androidx.fragment, which MainActivity needs for BiometricPrompt.
+    implementation("androidx.biometric:biometric:1.1.0")
 
     // Scheduling (AlarmManager primary, WorkManager as the resilient fallback)
     implementation("androidx.work:work-runtime-ktx:2.9.1")

@@ -29,7 +29,9 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -55,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -64,9 +67,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journal.app.BuildConfig
 import com.journal.app.R
 import com.journal.app.data.export.JournalExporter
+import com.journal.app.data.export.JournalImporter
 import com.journal.app.data.local.AiSettings
 import com.journal.app.ui.JournalViewModel
 import com.journal.app.ui.components.SectionCard
+import com.journal.app.ui.lock.AppLock
 import com.journal.app.ui.theme.AccentColor
 import com.journal.app.ui.theme.CardSurface
 import com.journal.app.ui.theme.OnAccent
@@ -86,8 +91,12 @@ fun SettingsScreen(
     viewModel: JournalViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val accent by viewModel.accent.collectAsStateWithLifecycle()
     val aiSettings by viewModel.aiSettings.collectAsStateWithLifecycle()
+    val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
+    val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val lockAvailable = remember { AppLock.canLock(context) }
 
     var keyDraft by rememberSaveable(aiSettings.apiKey) { mutableStateOf(aiSettings.apiKey) }
     var keyVisible by rememberSaveable { mutableStateOf(false) }
@@ -97,6 +106,7 @@ fun SettingsScreen(
     }
     var customSlug by rememberSaveable { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
+    var confirmRetag by remember { mutableStateOf(false) }
 
     val dirty = keyDraft != aiSettings.apiKey ||
         modelDraft != aiSettings.model ||
@@ -109,6 +119,10 @@ fun SettingsScreen(
     val exportMarkdown = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(JournalExporter.MARKDOWN_MIME)
     ) { uri -> uri?.let { viewModel.exportTo(it, asJson = false) } }
+
+    val importBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.importFrom(it) } }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -137,6 +151,40 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = accent.color
                 )
+            }
+        }
+
+        // ------------------------------------------------------------ security
+        item {
+            SectionCard(title = stringResource(R.string.settings_security)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.settings_app_lock),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(
+                                if (lockAvailable) {
+                                    R.string.settings_app_lock_hint
+                                } else {
+                                    R.string.settings_app_lock_unavailable
+                                }
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextTertiary
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = appLockEnabled && lockAvailable,
+                        enabled = lockAvailable,
+                        onCheckedChange = viewModel::setAppLockEnabled,
+                        colors = journalSwitchColors()
+                    )
+                }
             }
         }
 
@@ -424,9 +472,65 @@ fun SettingsScreen(
             }
         }
 
+        // ------------------------------------------------------------ import
+        item {
+            SectionCard(title = stringResource(R.string.settings_import)) {
+                Text(
+                    text = stringResource(R.string.settings_import_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(14.dp))
+                OutlinedButton(
+                    onClick = { importBackup.launch(JournalImporter.OPEN_MIME_TYPES) },
+                    enabled = !busy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.FileUpload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_import_json))
+                }
+            }
+        }
+
         // -------------------------------------------------------------- data
         item {
             SectionCard(title = stringResource(R.string.settings_data)) {
+                OutlinedButton(
+                    onClick = { confirmRetag = true },
+                    enabled = !busy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, TextTertiary.copy(alpha = 0.6f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_retag))
+                }
+
+                Spacer(Modifier.height(10.dp))
+
                 OutlinedButton(
                     onClick = { confirmClear = true },
                     modifier = Modifier
@@ -459,6 +563,37 @@ fun SettingsScreen(
                     .padding(top = 8.dp)
             )
         }
+    }
+
+    if (confirmRetag) {
+        AlertDialog(
+            onDismissRequest = { confirmRetag = false },
+            containerColor = CardSurface,
+            title = { Text(stringResource(R.string.settings_retag)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.settings_retag_confirm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.retagAll()
+                    confirmRetag = false
+                }) {
+                    Text(
+                        text = stringResource(R.string.action_ok),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRetag = false }) {
+                    Text(stringResource(R.string.action_cancel), color = TextSecondary)
+                }
+            }
+        )
     }
 
     if (confirmClear) {

@@ -26,6 +26,10 @@
     <string name="action_ok">კარგი</string>
     <string name="entry_saved">ჩანაწერი შენახულია</string>
     <string name="entry_deleted">ჩანაწერი წაიშალა</string>
+    <string name="entry_updated">ჩანაწერი განახლდა</string>
+    <string name="entry_edited">რედაქტირებული</string>
+    <string name="dialog_edit_title">ჩანაწერის რედაქტირება</string>
+    <string name="dialog_edit_retag">შენახვის შემდეგ თემები ხელახლა გამოითვლება.</string>
     <string name="source_notification">შეტყობინებიდან</string>
     <string name="dialog_prompt_bank">შეკითხვა ბანკიდან</string>
     <string name="dialog_prompt_ai">AI შეკითხვა</string>
@@ -106,6 +110,31 @@
     <string name="settings_export_md">Markdown</string>
     <string name="settings_export_done">%1$d ჩანაწერი გატანილია ✓</string>
     <string name="settings_export_failed">ექსპორტი ვერ მოხერხდა</string>
+
+    <!-- იმპორტი -->
+    <string name="settings_import">იმპორტი</string>
+    <string name="settings_import_hint">აირჩიე ადრე გატანილი JSON backup. ჩანაწერები დაემატება — უკვე არსებული გამოტოვდება, არაფერი წაიშლება.</string>
+    <string name="settings_import_json">JSON backup-ის იმპორტი</string>
+    <string name="settings_import_done">%1$d ახალი ჩანაწერი დაემატა ✓</string>
+    <string name="settings_import_none">ყველა ჩანაწერი უკვე არსებობს</string>
+    <string name="settings_import_wrong_file">ეს ფაილი Mind Journal-ის backup არ არის</string>
+    <string name="settings_import_too_new">ფაილი უფრო ახალი ვერსიითაა შექმნილი — განაახლე აპლიკაცია</string>
+    <string name="settings_import_empty">ფაილში ჩანაწერები არ არის</string>
+    <string name="settings_import_failed">იმპორტი ვერ მოხერხდა</string>
+
+    <!-- უსაფრთხოება -->
+    <string name="settings_security">უსაფრთხოება</string>
+    <string name="settings_app_lock">აპლიკაციის დაბლოკვა</string>
+    <string name="settings_app_lock_hint">გახსნისთვის საჭირო იქნება თითის ანაბეჭდი, სახე ან მოწყობილობის PIN/პაროლი.</string>
+    <string name="settings_app_lock_unavailable">მოწყობილობაზე არც ბიომეტრია და არც PIN/პაროლია დაყენებული.</string>
+    <string name="lock_title">დღიური დაბლოკილია</string>
+    <string name="lock_subtitle">გაიარე ავთენტიფიკაცია გასაგრძელებლად</string>
+    <string name="lock_body">ჩანაწერების სანახავად გაიარე ავთენტიფიკაცია თითის ანაბეჭდით, სახით ან მოწყობილობის PIN/პაროლით.</string>
+    <string name="lock_unlock">განბლოკვა</string>
+
+    <!-- ხელახალი ანალიზი -->
+    <string name="settings_retag">ყველა თემის ხელახალი გამოთვლა</string>
+    <string name="settings_retag_confirm">ყველა ჩანაწერის თემა ხელახლა გამოითვლება განახლებული ალგორითმით. ეს გამოიყენებს API მოთხოვნებს და შეიძლება რამდენიმე წუთს გასტანოს. გავაგრძელოთ?</string>
 
     <!-- აქცენტის ფერები -->
     <string name="accent_cyan">ცისფერი</string>

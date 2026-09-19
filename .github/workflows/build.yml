@@ -50,6 +50,64 @@ jobs:
               "platforms;android-34" "build-tools;34.0.0" > /dev/null
           fi
 
+      # Android refuses to install an update signed with a different key. Without a stable
+      # keystore every run produces an APK that can only be installed after uninstalling the
+      # previous one. Preference order: repo-committed key, then secret, then a cached
+      # generated key, then (last resort) an ephemeral one.
+      # Step 1 — the authoritative source, if configured. Checked before the cache so a stale
+      # cached key can never shadow the secret.
+      - name: Use keystore from secret
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -f keystore/mindjournal.jks ]; then
+            echo "KEYSTORE_SOURCE=committed" >> "$GITHUB_ENV"
+          elif [ -n "${KEYSTORE_BASE64:-}" ]; then
+            mkdir -p keystore
+            echo "$KEYSTORE_BASE64" | base64 -d > keystore/mindjournal.jks
+            echo "KEYSTORE_SOURCE=secret" >> "$GITHUB_ENV"
+          else
+            echo "KEYSTORE_SOURCE=none" >> "$GITHUB_ENV"
+          fi
+
+      # Step 2 — best-effort persistence when no secret is configured. Caches can be evicted,
+      # which is why the secret is the documented path.
+      - name: Restore cached keystore
+        if: env.KEYSTORE_SOURCE == 'none'
+        uses: actions/cache@v4
+        with:
+          path: keystore
+          key: mindjournal-keystore-v1
+
+      - name: Generate keystore if still missing
+        if: env.KEYSTORE_SOURCE == 'none'
+        run: |
+          set -euo pipefail
+          if [ -f keystore/mindjournal.jks ]; then
+            echo "Restored keystore from cache."
+          else
+            mkdir -p keystore
+            keytool -genkeypair -v \
+              -keystore keystore/mindjournal.jks \
+              -storepass mindjournal -keypass mindjournal -alias mindjournal \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Mind Journal, OU=Personal, O=Mind Journal, L=Tbilisi, C=GE"
+            echo "::warning::Generated a fresh signing key. It is cached, but if that cache is" \
+                 "evicted the next APK will refuse to install over this one. Add a" \
+                 "KEYSTORE_BASE64 secret (see README) to make signing permanent."
+          fi
+
+      # The SHA-256 fingerprint is the identity Android compares on update. If it changes
+      # between runs, that is exactly why an install would be rejected.
+      - name: Report signing identity
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          keytool -list -v -keystore keystore/mindjournal.jks \
+            -storepass "${KEYSTORE_PASSWORD:-mindjournal}" \
+            | grep -E 'Alias name|SHA256:' | head -n 4
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -64,13 +122,21 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      - name: Unit tests (spaced-random engine)
+      - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Assemble debug APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Assemble release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload debug APK

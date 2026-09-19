@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,6 +77,7 @@ fun HomeScreen(
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<JournalEntry?>(null) }
+    var editing by remember { mutableStateOf<JournalEntry?>(null) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -86,7 +88,8 @@ fun HomeScreen(
         } else {
             Timeline(
                 entries = entries,
-                onDelete = { pendingDelete = it }
+                onDelete = { pendingDelete = it },
+                onEdit = { editing = it }
             )
         }
 
@@ -137,6 +140,28 @@ fun HomeScreen(
         }
     }
 
+    editing?.let { entry ->
+        ModalBottomSheet(
+            onDismissRequest = { editing = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = CardSurface,
+            dragHandle = null
+        ) {
+            EditEntrySheet(
+                entry = entry,
+                onCancel = { editing = null },
+                onSave = { text, keepPrompt ->
+                    viewModel.editEntry(
+                        id = entry.id,
+                        content = text,
+                        prompt = entry.prompt.takeIf { keepPrompt }
+                    )
+                    editing = null
+                }
+            )
+        }
+    }
+
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -173,6 +198,7 @@ fun HomeScreen(
 private fun Timeline(
     entries: List<JournalEntry>,
     onDelete: (JournalEntry) -> Unit,
+    onEdit: (JournalEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -199,7 +225,7 @@ private fun Timeline(
                 )
             }
             items(items = dayEntries, key = { it.id }) { entry ->
-                EntryCard(entry = entry, onDelete = onDelete)
+                EntryCard(entry = entry, onDelete = onDelete, onEdit = onEdit)
             }
         }
     }
@@ -252,6 +278,115 @@ private fun EmptyTimeline(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
+    }
+}
+
+/**
+ * Edits an existing entry.
+ *
+ * Saving clears the entry's tags and re-queues it for analysis, since topics derived from the old
+ * wording would otherwise stick around. The original prompt can be kept or dropped, but not
+ * swapped — rerolling the question of an entry already written against it only causes confusion.
+ */
+@Composable
+private fun EditEntrySheet(
+    entry: JournalEntry,
+    onCancel: () -> Unit,
+    onSave: (String, Boolean) -> Unit
+) {
+    var text by rememberSaveable(entry.id) { mutableStateOf(entry.content) }
+    var keepPrompt by rememberSaveable(entry.id) { mutableStateOf(entry.prompt != null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .imePadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 20.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.dialog_edit_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        if (!entry.prompt.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = entry.prompt,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic,
+                    color = if (keepPrompt) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        TextTertiary
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = { keepPrompt = !keepPrompt },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (keepPrompt) {
+                            Icons.Outlined.Close
+                        } else {
+                            Icons.Outlined.Undo
+                        },
+                        contentDescription = stringResource(R.string.dialog_prompt_remove),
+                        tint = TextTertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp),
+            textStyle = MaterialTheme.typography.bodyLarge,
+            shape = RoundedCornerShape(14.dp),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Default
+            )
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.dialog_edit_retag),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.action_cancel), color = TextSecondary)
+            }
+            Spacer(Modifier.width(4.dp))
+            TextButton(
+                onClick = { onSave(text, keepPrompt) },
+                enabled = text.isNotBlank() && (text != entry.content || keepPrompt != (entry.prompt != null))
+            ) {
+                Text(
+                    text = stringResource(R.string.action_save),
+                    color = if (text.isNotBlank()) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        TextTertiary
+                    }
+                )
+            }
+        }
     }
 }
 

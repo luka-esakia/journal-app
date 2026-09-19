@@ -68,6 +68,7 @@ object JournalExporter {
                                 put("prompt", entry.prompt ?: JSONObject.NULL)
                                 put("source", entry.source)
                                 put("analyzed", entry.analyzed)
+                                put("edited_at_epoch_ms", entry.editedAt ?: JSONObject.NULL)
                                 put("tags", JSONArray(entry.tagList()))
                             }
                         )

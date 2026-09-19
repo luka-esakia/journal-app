@@ -13,6 +13,9 @@ interface JournalDao {
     @Insert
     suspend fun insert(entry: JournalEntry): Long
 
+    @Insert
+    suspend fun insertAll(entries: List<JournalEntry>): List<Long>
+
     @Update
     suspend fun update(entry: JournalEntry)
 
@@ -45,6 +48,24 @@ interface JournalDao {
 
     @Query("UPDATE journal_entries SET analyzed = 1 WHERE id = :id")
     suspend fun markAnalyzed(id: Long)
+
+    /**
+     * Applies an edit. Tags are cleared and `analyzed` reset so the new text gets re-tagged
+     * rather than keeping topics derived from the old wording.
+     */
+    @Query(
+        "UPDATE journal_entries SET content = :content, prompt = :prompt, edited_at = :editedAt, " +
+            "tags = '', analyzed = 0 WHERE id = :id"
+    )
+    suspend fun editEntry(id: Long, content: String, prompt: String?, editedAt: Long)
+
+    /** Queues every entry for re-tagging. Existing tags stay visible until replaced. */
+    @Query("UPDATE journal_entries SET analyzed = 0")
+    suspend fun resetAllAnalysis()
+
+    /** Duplicate probe for imports: same instant and same text means the same entry. */
+    @Query("SELECT COUNT(*) FROM journal_entries WHERE created_at = :createdAt AND content = :content")
+    suspend fun countMatching(createdAt: Long, content: String): Int
 
     @Query("DELETE FROM journal_entries")
     suspend fun deleteAll()

@@ -238,14 +238,22 @@ class OpenRouterClient private constructor() {
         null
     }
 
-    /** Accepts `#a, #b` / newline separated / bare words and normalizes to `#tag`. */
+    /**
+     * Accepts `#a, #b` / newline separated / bare words and normalizes to `#tag`.
+     *
+     * The stoplist is a second line of defence: models still reach for filler tags that fit every
+     * entry, and one useless tag on every card is more damaging than a missing one.
+     */
     private fun parseTags(raw: String): List<String> = raw
         .split(',', '\n', ';')
-        .map { it.trim().trim('.', '"', '\'', '-', '•', '*') }
+        .map { it.trim().trim('.', '"', '\'', '-', '•', '*', '„', '“') }
         .filter { it.isNotEmpty() }
         .map { if (it.startsWith("#")) it else "#$it" }
         .map { it.replace(" ", "_") }
-        .filter { it.length in 2..40 }
+        .filter { it.length in 3..32 }
+        // Reject multi-word tags that slipped past the prompt.
+        .filter { it.count { ch -> ch == '_' } <= 1 }
+        .filterNot { it.lowercase() in GENERIC_TAGS }
         .distinct()
         .take(MAX_TAGS)
 
@@ -260,15 +268,45 @@ class OpenRouterClient private constructor() {
         /** OpenRouter variant suffix: cheapest eligible route, flex service tier allowed. */
         private const val FLOOR_SUFFIX = ":floor"
 
+        /** Tags so generic they carry no signal — dropped even if the model returns them. */
+        private val GENERIC_TAGS = setOf(
+            "#ცხოვრება", "#დღე", "#დღეს", "#ფიქრი", "#ფიქრები", "#გრძნობა", "#გრძნობები",
+            "#საქმე", "#რამ", "#თემა", "#ჩანაწერი", "#დღიური", "#მომენტი", "#დრო",
+            "#ემოცია", "#ემოციები", "#აზრი", "#აზრები", "#ზოგადი", "#სხვა"
+        )
+
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
+        /**
+         * Tagging is the part users see most, so the prompt is strict: one-word nouns, a
+         * worked example of both a good and a bad answer, an explicit ban on restating the
+         * question, and permission to return fewer tags (or none) rather than padding with
+         * nonsense — which is what produced the junk tags in the first version.
+         */
         private val TAG_SYSTEM_PROMPT = """
-            შენ ხარ ქართული დღიურის სემანტიკური ანალიზატორი.
-            მიღებული ჩანაწერიდან გამოყავი 2-დან 5-მდე მოკლე თემატური თეგი ქართულ ენაზე.
-            წესები:
-            — თეგი იწყება # სიმბოლოთი და შედგება 1-2 სიტყვისგან (მაგ. #მუშაობა, #დაღლილობა, #ოჯახი).
-            — თეგები აღწერს თემას ან ემოციას, არა კონკრეტულ სახელებს.
-            — პასუხში დააბრუნე მხოლოდ თეგები, გამოყოფილი მძიმით. სხვა ტექსტი აკრძალულია.
+            შენ ხარ ქართული დღიურის თემატური ანალიზატორი.
+            დაადგინე, რაზეა ჩანაწერი, და დააბრუნე 2-4 თეგი ქართულ ენაზე.
+
+            თეგის ფორმა:
+            — იწყება # სიმბოლოთი, ერთი სიტყვა, სახელობით ბრუნვაში (#მუშაობა, არა #ვმუშაობდი).
+            — არსებითი სახელი ან მკაფიო ემოცია: #ძილი, #ოჯახი, #შფოთვა, #სპორტი, #ფული, #მეგობრები.
+
+            აკრძალულია:
+            — ზოგადი თეგები, რომლებიც ყველა ჩანაწერს მოერგება: #ცხოვრება, #დღე, #ფიქრი, #გრძნობა, #საქმე.
+            — შეკითხვის გადათქმა ან ჩანაწერიდან სიტყვების პირდაპირ კოპირება.
+            — საკუთარი სახელები, ადგილები, ბრენდები.
+            — ზმნები, ზედსართავები, ფრაზები ორ სიტყვაზე მეტით.
+
+            თუ ჩანაწერი ძალიან მოკლეა ან აზრობრივად ბუნდოვანია, დააბრუნე 1 თეგი ან ცარიელი პასუხი.
+            სჯობს ნაკლები თეგი, ვიდრე გამოგონილი.
+
+            მაგალითი 1:
+            ჩანაწერი: „დღეს ისევ 3 საათზე დავიძინე და მთელი დღე გატეხილი ვიყავი. ხვალ უნდა შევცვალო.“
+            პასუხი: #ძილი, #დაღლილობა
+
+            მაგალითი 2 (ცუდი პასუხი): #დღეს, #ვიყავი, #ცხოვრება — ასე არ გააკეთო.
+
+            პასუხში დააბრუნე მხოლოდ თეგები, მძიმით გამოყოფილი. სხვა ტექსტი აკრძალულია.
         """.trimIndent()
 
         private val REFLECTION_SYSTEM_PROMPT = """

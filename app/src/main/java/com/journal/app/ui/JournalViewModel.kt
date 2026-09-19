@@ -14,7 +14,9 @@ import com.journal.app.data.local.JournalEntry
 import com.journal.app.data.local.NotificationConfig
 import com.journal.app.data.local.PreferenceManager
 import com.journal.app.data.local.WeeklyReflection
+import com.journal.app.data.export.ImportException
 import com.journal.app.data.export.JournalExporter
+import com.journal.app.data.export.JournalImporter
 import com.journal.app.data.repository.JournalRepository
 import com.journal.app.notification.NotificationHelper
 import com.journal.app.notification.PromptBank
@@ -93,6 +95,14 @@ class JournalViewModel(
             repository.addEntry(content = content, prompt = prompt)
             _message.value = UiMessage.Res(R.string.entry_saved)
             clearPrompt()
+        }
+    }
+
+    fun editEntry(id: Long, content: String, prompt: String?) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            repository.editEntry(id = id, content = content, prompt = prompt)
+            _message.value = UiMessage.Res(R.string.entry_updated)
         }
     }
 
@@ -216,6 +226,68 @@ class JournalViewModel(
             )
         }
     }
+
+    /**
+     * Reads a backup document and merges it. Parse failures are reported before anything is
+     * written, so a wrong file selection can never damage the journal.
+     */
+    fun importFrom(uri: Uri) {
+        if (_busy.value) return
+        viewModelScope.launch {
+            _busy.value = true
+            val outcome = runCatching {
+                val raw = withContext(Dispatchers.IO) {
+                    app.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readBytes().toString(Charsets.UTF_8)
+                    } ?: error("could not open $uri")
+                }
+                val parsed = JournalImporter.parse(raw)
+                repository.importEntries(parsed.entries)
+            }
+            _busy.value = false
+
+            _message.value = outcome.fold(
+                onSuccess = { result ->
+                    if (result.imported == 0) {
+                        UiMessage.Res(R.string.settings_import_none)
+                    } else {
+                        UiMessage.Res(R.string.settings_import_done, result.imported)
+                    }
+                },
+                onFailure = { error ->
+                    when ((error as? ImportException)?.message) {
+                        "wrong-format", "not-json" ->
+                            UiMessage.Res(R.string.settings_import_wrong_file)
+                        "version-too-new" -> UiMessage.Res(R.string.settings_import_too_new)
+                        "no-entries" -> UiMessage.Res(R.string.settings_import_empty)
+                        else -> UiMessage.Res(R.string.settings_import_failed)
+                    }
+                }
+            )
+        }
+    }
+
+    // -------------------------------------------------------------- re-tagging
+
+    /** Clears every tag and regenerates them. Confirmed by the caller before it runs. */
+    fun retagAll() {
+        if (_busy.value) return
+        viewModelScope.launch {
+            _busy.value = true
+            val result = repository.retagAll()
+            _busy.value = false
+            _message.value = result.fold(
+                onSuccess = { count -> UiMessage.Res(R.string.insights_tagged, count) },
+                onFailure = { error -> toMessage(error) }
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------- lock
+
+    val appLockEnabled: StateFlow<Boolean> = preferences.appLockEnabled
+
+    fun setAppLockEnabled(enabled: Boolean) = preferences.setAppLockEnabled(enabled)
 
     fun suggestedExportName(asJson: Boolean): String =
         JournalExporter.suggestedFileName(

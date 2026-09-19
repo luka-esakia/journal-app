@@ -2,6 +2,7 @@ package com.journal.app.data.repository
 
 import android.content.Context
 import android.util.Log
+import com.journal.app.data.export.ImportResult
 import com.journal.app.data.local.JournalDao
 import com.journal.app.data.local.JournalDatabase
 import com.journal.app.data.local.JournalEntry
@@ -84,8 +85,93 @@ class JournalRepository private constructor(
         return id
     }
 
+    /**
+     * Rewrites an entry's text. The old tags are dropped and the entry re-queued for analysis,
+     * because topics derived from the previous wording would otherwise linger.
+     */
+    suspend fun editEntry(
+        id: Long,
+        content: String,
+        prompt: String?,
+        editedAt: Long = System.currentTimeMillis()
+    ) {
+        val trimmed = content.trim()
+        require(trimmed.isNotEmpty()) { "entry content must not be blank" }
+
+        withContext(Dispatchers.IO) {
+            dao.editEntry(
+                id = id,
+                content = trimmed,
+                prompt = prompt?.takeIf { it.isNotBlank() },
+                editedAt = editedAt
+            )
+        }
+        if (prefs.currentAiSettings().isUsable()) {
+            scope.launch { analyzeEntry(id) }
+        }
+    }
+
     suspend fun deleteEntry(entry: JournalEntry) = withContext(Dispatchers.IO) {
         dao.delete(entry)
+    }
+
+    /**
+     * Merges a parsed backup. Additive only: entries already present (same timestamp and text)
+     * are skipped, so re-importing the same file is a no-op and nothing is ever overwritten.
+     */
+    suspend fun importEntries(entries: List<JournalEntry>): ImportResult =
+        withContext(Dispatchers.IO) {
+            var skipped = 0
+            val fresh = mutableListOf<JournalEntry>()
+
+            entries.forEach { entry ->
+                if (dao.countMatching(entry.createdAt, entry.content) > 0) {
+                    skipped++
+                } else {
+                    fresh += entry.copy(id = 0L)
+                }
+            }
+            // Also guard against duplicates inside the file itself.
+            val deduped = fresh.distinctBy { it.createdAt to it.content }
+            skipped += fresh.size - deduped.size
+
+            if (deduped.isNotEmpty()) dao.insertAll(deduped)
+            ImportResult(imported = deduped.size, skipped = skipped)
+        }
+
+    /** Queues every entry for re-tagging, then walks the whole backlog. */
+    suspend fun retagAll(): Result<Int> {
+        val settings = prefs.currentAiSettings()
+        if (!settings.isUsable()) {
+            return Result.failure(OpenRouterException("missing api key"))
+        }
+        withContext(Dispatchers.IO) { dao.resetAllAnalysis() }
+
+        // Snapshot rather than re-querying `unanalyzed` in a loop: a failed call intentionally
+        // leaves `analyzed = 0` for a later retry, so a drain loop would never terminate while
+        // the API is down.
+        val snapshot = withContext(Dispatchers.IO) { dao.latest(MAX_RETAG) }
+        if (snapshot.size == MAX_RETAG) {
+            Log.w(TAG, "Re-tagging capped at $MAX_RETAG entries; older ones keep their tags")
+        }
+
+        var tagged = 0
+        var consecutiveFailures = 0
+        for (entry in snapshot) {
+            if (analyzeEntry(entry.id).isNotEmpty()) {
+                tagged++
+                consecutiveFailures = 0
+            } else {
+                consecutiveFailures++
+                // Bail out early rather than burning the user's credit on a failing key/model.
+                if (consecutiveFailures >= RETAG_FAILURE_LIMIT) {
+                    return Result.failure(
+                        OpenRouterException("re-tagging stopped after $consecutiveFailures failures")
+                    )
+                }
+            }
+        }
+        return Result.success(tagged)
     }
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
@@ -218,6 +304,8 @@ class JournalRepository private constructor(
         private const val TAG = "JournalRepository"
         private const val PENDING_BATCH = 15
         private const val RECENT_FOR_PROMPT = 25
+        private const val MAX_RETAG = 500
+        private const val RETAG_FAILURE_LIMIT = 3
         private val DATE_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMM", Locale("ka", "GE"))
 

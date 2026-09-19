@@ -140,6 +140,14 @@ class PreferenceManager private constructor(context: Context) {
     private val _weeklyReflection = MutableStateFlow(readReflection())
     val weeklyReflection: StateFlow<WeeklyReflection?> = _weeklyReflection.asStateFlow()
 
+    private val _appLockEnabled = MutableStateFlow(prefs.getBoolean(KEY_APP_LOCK, false))
+    val appLockEnabled: StateFlow<Boolean> = _appLockEnabled.asStateFlow()
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_APP_LOCK, enabled).apply()
+        _appLockEnabled.value = enabled
+    }
+
     // ---------------------------------------------------------------- accent
 
     fun setAccentKey(key: String) {
@@ -303,6 +311,7 @@ class PreferenceManager private constructor(context: Context) {
             "anthropic/claude-3.5-haiku",
             "anthropic/claude-3-5-haiku"
         )
+        private const val KEY_APP_LOCK = "app_lock_enabled"
         private const val KEY_REFLECTION = "weekly_reflection"
         private const val KEY_REFLECTION_AT = "weekly_reflection_at"
 

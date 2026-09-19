@@ -53,6 +53,9 @@ object NotificationHelper {
     const val EXTRA_NOTIFICATION_ID = "com.journal.app.extra.NOTIFICATION_ID"
     const val EXTRA_SLOT_INDEX = "com.journal.app.extra.SLOT_INDEX"
 
+    /** Tells [MainActivity] to reset navigation to the timeline when opened from a notification. */
+    const val EXTRA_OPEN_HOME = "com.journal.app.extra.OPEN_HOME"
+
     /** RemoteInput result key — must stay stable, replies are keyed by it. */
     const val KEY_TEXT_REPLY = "com.journal.app.KEY_TEXT_REPLY"
 
@@ -497,6 +500,10 @@ object NotificationHelper {
     private fun baseBuilder(context: Context, notificationId: Int): NotificationCompat.Builder {
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            // Distinct data per notification so FLAG_UPDATE_CURRENT does not collapse these
+            // into one PendingIntent that keeps the first notification's extras.
+            data = Uri.parse("mindjournal://open/$notificationId")
+            putExtra(EXTRA_OPEN_HOME, true)
         }
         val openPending = PendingIntent.getActivity(
             context,

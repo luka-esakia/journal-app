@@ -41,7 +41,11 @@ data class JournalEntry(
 
     /** True once the LLM has produced tags (or failed permanently) for this entry. */
     @ColumnInfo(name = "analyzed")
-    val analyzed: Boolean = false
+    val analyzed: Boolean = false,
+
+    /** Set the first time the entry is edited; null means untouched since it was written. */
+    @ColumnInfo(name = "edited_at")
+    val editedAt: Long? = null
 ) {
 
     /** Tags as a clean list; declared as a function so Room never mistakes it for a column. */
@@ -51,6 +55,8 @@ data class JournalEntry(
             .filter { it.isNotEmpty() }
 
     fun isFromNotification(): Boolean = source == SOURCE_NOTIFICATION
+
+    fun wasEdited(): Boolean = editedAt != null
 
     companion object {
         const val SOURCE_APP = "app"

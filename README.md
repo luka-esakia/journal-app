@@ -77,16 +77,32 @@ deliberately not used: a journal prompt can't wait hours for its tags.)
 rather than price — Mkhedruli is low-resource and the cheapest open models degrade on it. Default
 is `anthropic/claude-haiku-4.5`. Own slugs can be typed in and are persisted into the list.
 
-### 4. Export — `data/export/JournalExporter.kt`
+### 4. Export & import — `data/export/`
 
 Two formats, written through the Storage Access Framework (no storage permission):
 
-- **JSON** — the backup. Round-trips losslessly: ids, epoch-millis + ISO timestamps, prompt, AI
-  tags, source, analysis flag. The only format still readable if this app disappears.
+- **JSON** — the backup. Round-trips losslessly: epoch-millis + ISO timestamps, prompt, AI tags,
+  source, edit marker, analysis flag. The only format still readable if this app disappears.
 - **Markdown** — the reading copy, grouped by day, opens anywhere.
 
 Not CSV (entries are multi-line free text and every CSV consumer disagrees about embedded
 newlines); not a raw `.db` copy (opaque and schema-locked).
+
+Import is **additive and idempotent**. Ids from the file are discarded so the local database
+assigns its own; an entry whose timestamp and text already exist is skipped. Importing the same
+backup twice changes nothing, importing an old backup alongside newer entries merges them, and an
+import never deletes anything. The file is fully parsed and validated *before* a single row is
+written, so picking the wrong file cannot damage the journal.
+
+### 5. App lock — `ui/lock/AppLock.kt`
+
+Deliberately **not** a home-grown PIN. It delegates to `BiometricPrompt` with `DEVICE_CREDENTIAL`
+fallback: fingerprint or face when enrolled, otherwise the phone's own PIN / pattern / password.
+This app stores no secret and implements no lockout logic of its own. The lock screen is opaque
+and composed *instead of* the journal, so entry text never renders behind it.
+
+Re-locks when the app has been in the background for more than a couple of seconds — long enough
+that returning from the file picker or the biometric sheet itself doesn't re-prompt.
 
 ---
 
@@ -130,9 +146,37 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
 ```
 
 CI (`.github/workflows/build.yml`) installs JDK 17 + the Android SDK, generates the wrapper, runs
-the unit tests, and uploads both the debug and release APKs as artifacts. The release build is
-signed with the debug keystore so the artifact is installable without any repository secrets —
-replace `signingConfig` in `app/build.gradle.kts` before shipping to a store.
+the unit tests, and uploads both the debug and release APKs as artifacts.
+
+### Making updates installable (one-time setup)
+
+Android rejects an update whose signing key differs from the installed app — that is why a new
+APK previously had to be uninstalled before it would install. CI used to mint a throwaway debug
+key on every runner, so every build had a different signature.
+
+The build now signs with `keystore/mindjournal.jks` when present. CI will generate and cache one
+automatically, but **caches can be evicted**, and when that happens the next APK stops installing
+over the previous one. To make it permanent, create the key once and store it as a secret:
+
+```bash
+keytool -genkeypair -v -keystore keystore/mindjournal.jks -storepass mindjournal -keypass mindjournal -alias mindjournal -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Mind Journal, OU=Personal, O=Mind Journal, L=Tbilisi, C=GE"
+```
+
+```bash
+base64 -i keystore/mindjournal.jks | pbcopy
+```
+
+Paste that into a repository secret named `KEYSTORE_BASE64` (Settings → Secrets and variables →
+Actions). Optionally also set `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` if you used
+values other than `mindjournal`. Every future build is then signed identically and installs as a
+normal update.
+
+Each run prints the key's SHA-256 fingerprint under "Report signing identity" — if that value is
+stable across runs, updates will install. This is a self-signed personal key; a Play Store
+release needs a properly protected one, never committed.
+
+Because the signature changes once when you switch to a stable key, you will need to uninstall
+one final time after this change.
 
 ## Setup in the app
 

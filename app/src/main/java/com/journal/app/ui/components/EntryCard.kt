@@ -3,6 +3,7 @@ package com.journal.app.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -71,10 +72,13 @@ fun formatShortDateTime(millis: Long, zone: ZoneId = ZoneId.systemDefault()): St
 fun EntryCard(
     entry: JournalEntry,
     onDelete: (JournalEntry) -> Unit,
+    onEdit: (JournalEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onEdit(entry) },
         shape = RoundedCornerShape(CardCornerRadius),
         colors = CardDefaults.cardColors(containerColor = CardSurface),
         border = BorderStroke(1.dp, CardBorder),
@@ -95,6 +99,14 @@ fun EntryCard(
                         contentDescription = stringResource(R.string.source_notification),
                         tint = TextTertiary,
                         modifier = Modifier.size(14.dp)
+                    )
+                }
+                if (entry.wasEdited()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.entry_edited),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextTertiary
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -232,7 +244,8 @@ private fun EntryCardPreview() {
                 source = JournalEntry.SOURCE_NOTIFICATION,
                 analyzed = true
             ),
-            onDelete = {}
+            onDelete = {},
+            onEdit = {}
         )
     }
 }
