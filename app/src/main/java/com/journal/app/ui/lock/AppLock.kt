@@ -2,6 +2,7 @@ package com.journal.app.ui.lock
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -19,6 +20,8 @@ import com.journal.app.R
  * this app, and there is no custom lockout logic to get wrong.
  */
 object AppLock {
+
+    private const val TAG = "AppLock"
 
     /** Why the lock cannot be turned on, or null when it can. */
     enum class Availability {
@@ -40,7 +43,16 @@ object AppLock {
             BIOMETRIC_WEAK
         }
 
-    fun availability(context: Context): Availability {
+    fun availability(context: Context): Availability = try {
+        query(context)
+    } catch (t: Throwable) {
+        // This is called during activity startup. A vendor BiometricManager that misbehaves
+        // must degrade to "no lock available", never take the app down on launch.
+        Log.w(TAG, "Biometric availability check failed", t)
+        Availability.UNSUPPORTED
+    }
+
+    private fun query(context: Context): Availability {
         val manager = BiometricManager.from(context)
         return when (manager.canAuthenticate(authenticators())) {
             BiometricManager.BIOMETRIC_SUCCESS -> Availability.AVAILABLE

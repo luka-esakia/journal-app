@@ -149,8 +149,13 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // App lock: biometrics with device PIN/pattern/password fallback.
-    // Pulls in androidx.fragment, which MainActivity needs for BiometricPrompt.
     implementation("androidx.biometric:biometric:1.1.0")
+
+    // biometric 1.1.0 pins androidx.fragment 1.2.5 (2020). Nothing else in this project pulls
+    // fragment, so that stale version would win — and a FragmentActivity from 1.2.5 running
+    // against activity 1.9.2 does not install the ViewTree owners that Compose's setContent
+    // requires, which crashes the app during launch. Pin fragment alongside activity instead.
+    implementation("androidx.fragment:fragment-ktx:1.8.4")
 
     // Scheduling (AlarmManager primary, WorkManager as the resilient fallback)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
