@@ -65,11 +65,38 @@ jobs:
             echo "KEYSTORE_SOURCE=committed" >> "$GITHUB_ENV"
           elif [ -n "${KEYSTORE_BASE64:-}" ]; then
             mkdir -p keystore
-            echo "$KEYSTORE_BASE64" | base64 -d > keystore/mindjournal.jks
+
+            # Strip all whitespace first: pastes arrive wrapped, with CRLFs, or with a trailing
+            # newline depending on how the secret was created, and GNU base64 rejects the lot.
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' > /tmp/keystore.b64
+            chars=$(wc -c < /tmp/keystore.b64)
+            echo "KEYSTORE_BASE64 contains $chars base64 characters (expected ~3400)."
+
+            if ! base64 -d /tmp/keystore.b64 > keystore/mindjournal.jks 2>/dev/null; then
+              rm -f keystore/mindjournal.jks
+              echo "::error::KEYSTORE_BASE64 is not valid base64 ($chars chars). Re-copy it with:"
+              echo "::error::base64 -i keystore/mindjournal.jks | pbcopy   (macOS)"
+              echo "::error::and paste the whole value into the secret with no extra characters."
+              exit 1
+            fi
+
+            # A PKCS12 keystore is DER: it must start with a SEQUENCE tag (0x30 0x82).
+            size=$(wc -c < keystore/mindjournal.jks)
+            magic=$(head -c 2 keystore/mindjournal.jks | od -An -tx1 | tr -d ' \n')
+            if [ "$size" -lt 1000 ] || [ "$magic" != "3082" ]; then
+              rm -f keystore/mindjournal.jks
+              echo "::error::Decoded $size bytes starting with '$magic' — that is not a PKCS12"
+              echo "::error::keystore. The secret is probably truncated; expected ~2548 bytes."
+              exit 1
+            fi
+
+            echo "Decoded a $size-byte keystore from the secret."
             echo "KEYSTORE_SOURCE=secret" >> "$GITHUB_ENV"
           else
+            echo "No KEYSTORE_BASE64 secret set; falling back to a cached or generated key."
             echo "KEYSTORE_SOURCE=none" >> "$GITHUB_ENV"
           fi
+          rm -f /tmp/keystore.b64
 
       # Step 2 — best-effort persistence when no secret is configured. Caches can be evicted,
       # which is why the secret is the documented path.
