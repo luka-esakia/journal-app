@@ -151,10 +151,14 @@ dependencies {
     // App lock: biometrics with device PIN/pattern/password fallback.
     implementation("androidx.biometric:biometric:1.1.0")
 
-    // biometric 1.1.0 pins androidx.fragment 1.2.5 (2020). Nothing else in this project pulls
-    // fragment, so that stale version would win — and a FragmentActivity from 1.2.5 running
-    // against activity 1.9.2 does not install the ViewTree owners that Compose's setContent
-    // requires, which crashes the app during launch. Pin fragment alongside activity instead.
+    // biometric 1.1.0 pins androidx.fragment 1.2.5 (2020), and nothing else here depends on
+    // fragment, so that stale version won resolution. FragmentActivity 1.2.5 still enforces the
+    // old startActivityForResult contract in validateRequestPermissionsRequestCode() — request
+    // codes must fit in 16 bits — while activity 1.9.2's ActivityResultRegistry generates larger
+    // ones. The result was a hard crash on launch the moment POST_NOTIFICATIONS was requested:
+    //   java.lang.IllegalArgumentException: Can only use lower 16 bits for requestCode
+    //     at androidx.fragment.app.FragmentActivity.checkForValidRequestCode
+    // Fragment 1.3.0 dropped that validation. Pinning it alongside activity keeps the two in step.
     implementation("androidx.fragment:fragment-ktx:1.8.4")
 
     // Scheduling (AlarmManager primary, WorkManager as the resilient fallback)
