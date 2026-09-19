@@ -154,22 +154,27 @@ Android rejects an update whose signing key differs from the installed app — t
 APK previously had to be uninstalled before it would install. CI used to mint a throwaway debug
 key on every runner, so every build had a different signature.
 
-The build now signs with `keystore/mindjournal.jks` when present. CI will generate and cache one
-automatically, but **caches can be evicted**, and when that happens the next APK stops installing
-over the previous one. To make it permanent, create the key once and store it as a secret:
+The build signs with `keystore/mindjournal.jks` when present. That file is **git-ignored on
+purpose** — a signing key does not belong in a repository — so CI receives it through a secret.
 
-```bash
-keytool -genkeypair -v -keystore keystore/mindjournal.jks -storepass mindjournal -keypass mindjournal -alias mindjournal -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Mind Journal, OU=Personal, O=Mind Journal, L=Tbilisi, C=GE"
-```
+The key already exists at `keystore/mindjournal.jks` (PKCS12, alias `mindjournal`, password
+`mindjournal`, valid until 2054). Publish it to CI once:
 
 ```bash
 base64 -i keystore/mindjournal.jks | pbcopy
 ```
 
-Paste that into a repository secret named `KEYSTORE_BASE64` (Settings → Secrets and variables →
-Actions). Optionally also set `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` if you used
-values other than `mindjournal`. Every future build is then signed identically and installs as a
-normal update.
+Paste the clipboard into a repository secret named `KEYSTORE_BASE64` (Settings → Secrets and
+variables → Actions → New repository secret). If you ever regenerate the key with a different
+password or alias, also set `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
+
+Without that secret CI falls back to a generated, cached key — which works until the cache is
+evicted, at which point installs start failing again. The secret is the durable answer.
+
+To recreate the key from scratch without a JDK, run
+[`tools/generate_keystore.py`](tools/generate_keystore.py) — it writes an equivalent PKCS12
+keystore using Python's `cryptography` package. Note that replacing the key changes the signing
+identity, so installed builds would need one more uninstall.
 
 Each run prints the key's SHA-256 fingerprint under "Report signing identity" — if that value is
 stable across runs, updates will install. This is a self-signed personal key; a Play Store

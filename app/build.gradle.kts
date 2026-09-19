@@ -50,6 +50,10 @@ android {
                     System.getenv(name)?.takeIf { it.isNotBlank() } ?: fallback
 
                 storeFile = sharedKeystore
+                // PKCS12 despite the .jks extension — what modern keytool writes by default,
+                // and what this project's key actually is. Stated explicitly so the build does
+                // not depend on the JDK's default keystore type.
+                storeType = "PKCS12"
                 storePassword = env("KEYSTORE_PASSWORD", DEFAULT_KEYSTORE_SECRET)
                 keyAlias = env("KEY_ALIAS", "mindjournal")
                 keyPassword = env("KEY_PASSWORD", DEFAULT_KEYSTORE_SECRET)

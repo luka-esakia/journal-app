@@ -10,5 +10,9 @@
 local.properties
 app/build
 *.apk
+
+# Signing keys never belong in the repository. CI receives the keystore through the
+# KEYSTORE_BASE64 secret instead — see README, "Making updates installable".
 *.keystore
-!debug.keystore
+*.jks
+keystore/
