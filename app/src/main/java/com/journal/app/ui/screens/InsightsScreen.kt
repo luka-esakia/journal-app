@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -178,9 +179,12 @@ fun InsightsScreen(
                 Button(
                     onClick = viewModel::generateWeeklyReflection,
                     enabled = !busy,
+                    // Sized by content, never pinned: "კვირის რეფლექსიის გენერაცია" wraps to two
+                    // lines on a phone and a fixed height clips the second one.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
+                        .defaultMinSize(minHeight = 52.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -209,7 +213,8 @@ fun InsightsScreen(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = stringResource(R.string.insights_generate),
-                            style = MaterialTheme.typography.labelLarge
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }

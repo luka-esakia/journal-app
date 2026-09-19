@@ -42,7 +42,8 @@
     <string name="insights_tags_empty">თემები გამოჩნდება მაშინ, როცა AI ანალიზს გაუშვებ.</string>
     <string name="insights_weekly">კვირის რეფლექსია</string>
     <string name="insights_weekly_empty">კვირის რეფლექსია ჯერ არ არის შექმნილი.</string>
-    <string name="insights_generate">კვირის რეფლექსიის გენერაცია</string>
+    <!-- Short on purpose: the card title already says "კვირის რეფლექსია". -->
+    <string name="insights_generate">რეფლექსიის შექმნა</string>
     <string name="insights_analyze">ჩანაწერების ანალიზი</string>
     <string name="insights_pending">გაუანალიზებელი ჩანაწერი: %1$d</string>
     <string name="insights_tagged">%1$d ჩანაწერი გაანალიზდა</string>

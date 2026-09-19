@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -358,7 +359,7 @@ fun SettingsScreen(
                     enabled = dirty,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .defaultMinSize(minHeight = 52.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -425,7 +426,7 @@ fun SettingsScreen(
                         onClick = { exportJson.launch(viewModel.suggestedExportName(asJson = true)) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp),
+                            .defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(
                             1.dp,
@@ -452,7 +453,7 @@ fun SettingsScreen(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp),
+                            .defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, TextTertiary.copy(alpha = 0.6f)),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
@@ -486,7 +487,7 @@ fun SettingsScreen(
                     enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(
                         1.dp,
@@ -515,7 +516,7 @@ fun SettingsScreen(
                     enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, TextTertiary.copy(alpha = 0.6f)),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
@@ -535,7 +536,7 @@ fun SettingsScreen(
                     onClick = { confirmClear = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
                     colors = ButtonDefaults.outlinedButtonColors(

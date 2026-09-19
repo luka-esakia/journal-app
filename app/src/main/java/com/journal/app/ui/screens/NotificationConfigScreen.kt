@@ -285,7 +285,7 @@ fun NotificationConfigScreen(
                 onClick = { viewModel.saveConfig(draft) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .defaultMinSize(minHeight = 52.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
