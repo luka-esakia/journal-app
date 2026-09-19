@@ -81,7 +81,11 @@ object AppLock {
             activity,
             executor,
             object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: AuthenticationResult) {
+                // AuthenticationResult is nested under BiometricPrompt, not under the callback,
+                // so it has to be qualified even from inside AuthenticationCallback.
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult
+                ) {
                     onSuccess()
                 }
 
