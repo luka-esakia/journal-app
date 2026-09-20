@@ -2,6 +2,7 @@ package com.journal.app.data.remote
 
 import android.util.Log
 import com.journal.app.data.local.AiSettings
+import com.journal.app.data.local.AiTask
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -54,6 +55,7 @@ class OpenRouterClient private constructor() {
         }
         return chat(
             settings = settings,
+            task = AiTask.TAGS,
             systemPrompt = TAG_SYSTEM_PROMPT,
             userPrompt = user,
             maxTokens = 120,
@@ -83,6 +85,7 @@ class OpenRouterClient private constructor() {
         }
         return chat(
             settings = settings,
+            task = AiTask.REFLECTION,
             systemPrompt = REFLECTION_SYSTEM_PROMPT,
             userPrompt = user,
             maxTokens = 700,
@@ -106,6 +109,7 @@ class OpenRouterClient private constructor() {
         }
         return chat(
             settings = settings,
+            task = AiTask.PROMPT,
             systemPrompt = PROMPT_SYSTEM_PROMPT,
             userPrompt = user,
             maxTokens = 120,
@@ -125,6 +129,7 @@ class OpenRouterClient private constructor() {
 
     private suspend fun chat(
         settings: AiSettings,
+        task: AiTask,
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int,
@@ -135,7 +140,7 @@ class OpenRouterClient private constructor() {
         }
 
         val payload = JSONObject().apply {
-            put("model", resolveModel(settings))
+            put("model", resolveModel(settings, task))
             put("max_tokens", maxTokens)
             put("temperature", temperature)
             put(
@@ -201,7 +206,8 @@ class OpenRouterClient private constructor() {
     }
 
     /**
-     * Applies the `:floor` variant suffix when low-priority mode is on.
+     * Picks the slug configured for [task] and applies the `:floor` variant suffix when
+     * low-priority mode is on.
      *
      * Per OpenRouter's provider-routing docs, `:floor` is "a superset of setting `provider.sort`
      * to `price`" and additionally "makes flex service tier endpoints eligible" — i.e. the request
@@ -209,8 +215,13 @@ class OpenRouterClient private constructor() {
      * `:batch` variants are exactly half price but deliver asynchronously, which is why they are
      * not used here — a journal prompt cannot wait hours for its tags.)
      */
-    private fun resolveModel(settings: AiSettings): String {
-        val base = settings.model.trim().ifBlank { AiSettings.DEFAULT_MODEL }
+    internal fun resolveModel(settings: AiSettings, task: AiTask): String {
+        val base = settings.modelFor(task).trim().ifBlank {
+            when (task) {
+                AiTask.REFLECTION -> AiSettings.DEFAULT_REFLECTION_MODEL
+                AiTask.TAGS, AiTask.PROMPT -> AiSettings.DEFAULT_TAG_MODEL
+            }
+        }
         if (!settings.lowPriority) return base
         // Never stack variants: a slug the user typed with its own suffix is left alone.
         return if (base.contains(':')) base else "$base$FLOOR_SUFFIX"

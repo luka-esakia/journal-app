@@ -3,10 +3,14 @@ package com.journal.app.data.repository
 import android.content.Context
 import android.util.Log
 import com.journal.app.data.export.ImportResult
+import com.journal.app.data.export.ParsedBackup
+import com.journal.app.data.local.AiTask
 import com.journal.app.data.local.JournalDao
 import com.journal.app.data.local.JournalDatabase
 import com.journal.app.data.local.JournalEntry
 import com.journal.app.data.local.PreferenceManager
+import com.journal.app.data.local.Reflection
+import com.journal.app.data.local.ReflectionDao
 import com.journal.app.data.remote.OpenRouterClient
 import com.journal.app.data.remote.OpenRouterException
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +34,7 @@ import java.util.Locale
  */
 class JournalRepository private constructor(
     private val dao: JournalDao,
+    private val reflectionDao: ReflectionDao,
     private val prefs: PreferenceManager,
     private val client: OpenRouterClient
 ) {
@@ -37,7 +42,14 @@ class JournalRepository private constructor(
     /** Survives individual callers (receivers, view models) so enrichment is never cancelled. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    init {
+        scope.launch { migrateLegacyReflection() }
+    }
+
     val entries: Flow<List<JournalEntry>> = dao.observeAll()
+
+    /** Every generated reflection, newest first. */
+    val reflections: Flow<List<Reflection>> = reflectionDao.observeAll()
 
     val unanalyzedCount: Flow<Int> = dao.observeUnanalyzedCount()
 
@@ -86,13 +98,18 @@ class JournalRepository private constructor(
     }
 
     /**
-     * Rewrites an entry's text. The old tags are dropped and the entry re-queued for analysis,
-     * because topics derived from the previous wording would otherwise linger.
+     * Rewrites an entry's text.
+     *
+     * @param tags when null, the old tags are dropped and the entry is re-queued for analysis,
+     *   because topics derived from the previous wording would otherwise linger. When non-null
+     *   the user edited the tags by hand, so they are stored as-is and the LLM is not invited to
+     *   overwrite them — hand-written tags outrank generated ones.
      */
     suspend fun editEntry(
         id: Long,
         content: String,
         prompt: String?,
+        tags: List<String>? = null,
         editedAt: Long = System.currentTimeMillis()
     ) {
         val trimmed = content.trim()
@@ -105,10 +122,23 @@ class JournalRepository private constructor(
                 prompt = prompt?.takeIf { it.isNotBlank() },
                 editedAt = editedAt
             )
+            // editEntry clears tags and resets `analyzed`; re-apply straight after so a combined
+            // text-and-tag edit does not lose the tags the user just typed.
+            if (tags != null) dao.applyTags(id, JournalEntry.joinTags(tags))
         }
-        if (prefs.currentAiSettings().isUsable()) {
+        if (tags == null && prefs.currentAiSettings().isUsable()) {
             scope.launch { analyzeEntry(id) }
         }
+    }
+
+    /**
+     * Replaces an entry's tags without touching its text.
+     *
+     * Marks the entry analyzed, which is what keeps the background tagger from quietly reverting
+     * the edit on its next pass.
+     */
+    suspend fun updateTags(id: Long, tags: List<String>) = withContext(Dispatchers.IO) {
+        dao.applyTags(id, JournalEntry.joinTags(tags.mapNotNull(JournalEntry::normalizeTag)))
     }
 
     suspend fun deleteEntry(entry: JournalEntry) = withContext(Dispatchers.IO) {
@@ -118,26 +148,56 @@ class JournalRepository private constructor(
     /**
      * Merges a parsed backup. Additive only: entries already present (same timestamp and text)
      * are skipped, so re-importing the same file is a no-op and nothing is ever overwritten.
+     *
+     * Reflections come with the entry ids *the exporting device* used, which mean nothing here.
+     * Each file id is therefore resolved to the local row — the one just inserted, or the
+     * existing duplicate that was skipped — and ids with no local counterpart are dropped rather
+     * than kept as dangling numbers. Inserting one entry at a time (instead of `insertAll`) is
+     * what makes that mapping available; a backup is a few thousand rows at most, once.
      */
-    suspend fun importEntries(entries: List<JournalEntry>): ImportResult =
-        withContext(Dispatchers.IO) {
-            var skipped = 0
-            val fresh = mutableListOf<JournalEntry>()
+    suspend fun importBackup(backup: ParsedBackup): ImportResult = withContext(Dispatchers.IO) {
+        var skippedEntries = 0
+        /** Exported entry id → local row id. */
+        val idMap = HashMap<Long, Long>()
+        var imported = 0
 
-            entries.forEach { entry ->
-                if (dao.countMatching(entry.createdAt, entry.content) > 0) {
-                    skipped++
-                } else {
-                    fresh += entry.copy(id = 0L)
-                }
+        backup.entries.forEachIndexed { index, entry ->
+            val fileId = backup.sourceIds.getOrNull(index)
+
+            // Catches rows this device already had *and* duplicates inside the file itself: the
+            // first copy has been inserted by the time the second is looked up.
+            val existing = dao.idOf(entry.createdAt, entry.content)
+            if (existing != null) {
+                skippedEntries++
+                if (fileId != null) idMap[fileId] = existing
+                return@forEachIndexed
             }
-            // Also guard against duplicates inside the file itself.
-            val deduped = fresh.distinctBy { it.createdAt to it.content }
-            skipped += fresh.size - deduped.size
 
-            if (deduped.isNotEmpty()) dao.insertAll(deduped)
-            ImportResult(imported = deduped.size, skipped = skipped)
+            // id is already 0 out of the importer; forced here so a future parser change cannot
+            // let a file-supplied id overwrite a local row.
+            val localId = dao.insert(entry.copy(id = 0L))
+            imported++
+            if (fileId != null) idMap[fileId] = localId
         }
+
+        var importedReflections = 0
+        backup.reflections.forEach { parsed ->
+            if (reflectionDao.countMatching(parsed.generatedAt, parsed.text) > 0) return@forEach
+            reflectionDao.insert(
+                parsed.reflection.copy(
+                    id = 0L,
+                    sourceEntryIds = Reflection.joinIds(parsed.sourceIds.mapNotNull(idMap::get))
+                )
+            )
+            importedReflections++
+        }
+
+        ImportResult(
+            imported = imported,
+            skipped = skippedEntries,
+            importedReflections = importedReflections
+        )
+    }
 
     /** Queues every entry for re-tagging, then walks the whole backlog. */
     suspend fun retagAll(): Result<Int> {
@@ -176,7 +236,13 @@ class JournalRepository private constructor(
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         dao.deleteAll()
-        prefs.clearWeeklyReflection()
+        // Reflections are derived from entries; keeping them would leave a summary of a journal
+        // that no longer exists, with source links pointing at deleted rows.
+        reflectionDao.deleteAll()
+    }
+
+    suspend fun deleteReflection(reflection: Reflection) = withContext(Dispatchers.IO) {
+        reflectionDao.delete(reflection)
     }
 
     // ----------------------------------------------------------------- reads
@@ -256,8 +322,15 @@ class JournalRepository private constructor(
         }
     }
 
-    /** Generates and persists the weekly reflection over the trailing seven days. */
-    suspend fun generateWeeklyReflection(now: Long = System.currentTimeMillis()): Result<String> {
+    /**
+     * Generates and persists the weekly reflection over the trailing seven days.
+     *
+     * The ids of the entries that were actually sent are stored alongside the text, so an export
+     * can show exactly which raw material produced which reflection. Only entries that made it
+     * into the request are recorded — not "everything in the window" — which is the difference
+     * between provenance and a guess.
+     */
+    suspend fun generateWeeklyReflection(now: Long = System.currentTimeMillis()): Result<Reflection> {
         val settings = prefs.currentAiSettings()
         if (!settings.isUsable()) {
             return Result.failure(OpenRouterException("missing api key"))
@@ -284,8 +357,44 @@ class JournalRepository private constructor(
             label to text
         }
 
-        return client.weeklyReflection(settings, dated).onSuccess { text ->
-            prefs.saveWeeklyReflection(text, now)
+        return client.weeklyReflection(settings, dated).mapCatching { text ->
+            val reflection = Reflection(
+                text = text,
+                generatedAt = now,
+                periodStart = from,
+                periodEnd = to,
+                sourceEntryIds = Reflection.joinIds(week.map { it.id }),
+                model = settings.modelFor(AiTask.REFLECTION)
+            )
+            val id = withContext(Dispatchers.IO) { reflectionDao.insert(reflection) }
+            reflection.copy(id = id)
+        }
+    }
+
+    /**
+     * Moves the single pre-v3 reflection out of preferences and into the table, once.
+     *
+     * Its source ids are unknowable — the old storage never recorded them — so the row lands with
+     * an empty list. That is honest: an export will show "no recorded sources" rather than
+     * inventing a plausible week's worth.
+     */
+    private suspend fun migrateLegacyReflection() {
+        try {
+            val legacy = prefs.consumeLegacyReflection() ?: return
+            if (reflectionDao.count() > 0) return
+            val generatedAt = legacy.generatedAt
+            reflectionDao.insert(
+                Reflection(
+                    text = legacy.text,
+                    generatedAt = generatedAt,
+                    periodStart = generatedAt - LEGACY_PERIOD_MILLIS,
+                    periodEnd = generatedAt,
+                    sourceEntryIds = "",
+                    model = ""
+                )
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not migrate the legacy reflection", t)
         }
     }
 
@@ -306,6 +415,10 @@ class JournalRepository private constructor(
         private const val RECENT_FOR_PROMPT = 25
         private const val MAX_RETAG = 500
         private const val RETAG_FAILURE_LIMIT = 3
+
+        /** Assumed span of a migrated pre-v3 reflection: the seven days it always covered. */
+        private const val LEGACY_PERIOD_MILLIS = 7L * 24 * 60 * 60 * 1000
+
         private val DATE_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMM", Locale("ka", "GE"))
 
@@ -314,11 +427,15 @@ class JournalRepository private constructor(
 
         fun getInstance(context: Context): JournalRepository =
             instance ?: synchronized(this) {
-                instance ?: JournalRepository(
-                    dao = JournalDatabase.getInstance(context).journalDao(),
-                    prefs = PreferenceManager.getInstance(context),
-                    client = OpenRouterClient.getInstance()
-                ).also { instance = it }
+                instance ?: run {
+                    val database = JournalDatabase.getInstance(context)
+                    JournalRepository(
+                        dao = database.journalDao(),
+                        reflectionDao = database.reflectionDao(),
+                        prefs = PreferenceManager.getInstance(context),
+                        client = OpenRouterClient.getInstance()
+                    ).also { instance = it }
+                }
             }
     }
 }

@@ -33,8 +33,9 @@ android {
         applicationId = "com.journal.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        // Bumped for Room schema v3 (the reflections table) and the notification deep links.
+        versionCode = 3
+        versionName = "1.2.0"
 
         // The whole UI is Georgian; keep only the resources we actually ship.
         resourceConfigurations += setOf("ka", "en")

@@ -63,10 +63,33 @@ data class JournalEntry(
         const val SOURCE_NOTIFICATION = "notification"
         const val TAG_SEPARATOR = ","
 
+        /** Long enough for any Georgian compound noun, short enough to fit a chip. */
+        const val MAX_TAG_LENGTH = 32
+
+        private val WHITESPACE = Regex("\\s+")
+
         fun joinTags(tags: List<String>): String =
             tags.map { it.trim() }
                 .filter { it.isNotEmpty() }
                 .distinct()
                 .joinToString(TAG_SEPARATOR)
+
+        /**
+         * Canonical form of a hand-typed tag, or null when nothing usable is left.
+         *
+         * The comma is stripped rather than escaped: it is the storage separator, so a tag
+         * containing one would silently split into two on the next read. Whitespace collapses to
+         * `_`, matching how the LLM is told to format multi-word tags.
+         */
+        fun normalizeTag(raw: String): String? {
+            val cleaned = raw
+                .replace(TAG_SEPARATOR, " ")
+                .trim()
+                .trim('#', '.', '"', '\'', '-', '•', '*', '„', '“', '”')
+                .trim()
+                .replace(WHITESPACE, "_")
+                .take(MAX_TAG_LENGTH)
+            return if (cleaned.isEmpty()) null else "#$cleaned"
+        }
     }
 }

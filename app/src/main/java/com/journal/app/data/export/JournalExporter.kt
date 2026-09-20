@@ -1,6 +1,7 @@
 package com.journal.app.data.export
 
 import com.journal.app.data.local.JournalEntry
+import com.journal.app.data.local.Reflection
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -28,23 +29,55 @@ object JournalExporter {
     const val MARKDOWN_MIME = "text/markdown"
 
     const val FORMAT_ID = "mind-journal-export"
-    const val FORMAT_VERSION = 1
+
+    /** v2 adds the `reflections` array. v1 files (entries only) still import unchanged. */
+    const val FORMAT_VERSION = 2
 
     private val GEORGIAN = Locale("ka", "GE")
     private val FILE_STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US)
     private val DAY_HEADING: DateTimeFormatter =
         DateTimeFormatter.ofPattern("d MMMM yyyy, EEEE", GEORGIAN)
     private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", GEORGIAN)
+    private val SOURCE_STAMP: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("d MMM, HH:mm", GEORGIAN)
+
+    /** Enough of a source entry to recognise it in the timeline above, not a second copy of it. */
+    private const val SOURCE_PREVIEW_CHARS = 90
+
+    /**
+     * A one-line citation of a source entry, ellipsised when it was actually cut.
+     *
+     * The UI can hand this job to the renderer (`maxLines` + `TextOverflow.Ellipsis`), which
+     * knows where the text stops fitting. A text file has no renderer, so the cut is by
+     * character — and it has to be marked, or the export silently presents a truncated entry as
+     * the whole thing. The entry itself is written out in full further up the document.
+     */
+    private fun preview(content: String): String {
+        val flat = content.replace('\n', ' ').trim()
+        return if (flat.length <= SOURCE_PREVIEW_CHARS) {
+            flat
+        } else {
+            flat.take(SOURCE_PREVIEW_CHARS).trimEnd() + "…"
+        }
+    }
 
     fun suggestedFileName(extension: String, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
         val stamp = Instant.ofEpochMilli(now).atZone(zone).format(FILE_STAMP)
         return "mind-journal-$stamp.$extension"
     }
 
-    /** Lossless backup. Timestamps carry both epoch millis and an ISO-8601 rendering. */
+    /**
+     * Lossless backup. Timestamps carry both epoch millis and an ISO-8601 rendering.
+     *
+     * Entry ids are exported even though an import discards them, because they are what makes
+     * `reflections[].source_entry_ids` mean anything: the importer maps each exported id onto the
+     * row it becomes locally, and so the link between a reflection and the raw entries behind it
+     * survives moving to a new device.
+     */
     fun toJson(
         entries: List<JournalEntry>,
         exportedAt: Long,
+        reflections: List<Reflection> = emptyList(),
         zone: ZoneId = ZoneId.systemDefault()
     ): String {
         val payload = JSONObject().apply {
@@ -54,6 +87,7 @@ object JournalExporter {
             put("exported_at_epoch_ms", exportedAt)
             put("time_zone", zone.id)
             put("entry_count", entries.size)
+            put("reflection_count", reflections.size)
             put(
                 "entries",
                 JSONArray().apply {
@@ -75,14 +109,47 @@ object JournalExporter {
                     }
                 }
             )
+            put(
+                "reflections",
+                JSONArray().apply {
+                    reflections.sortedBy { it.generatedAt }.forEach { reflection ->
+                        put(
+                            JSONObject().apply {
+                                put("id", reflection.id)
+                                put("generated_at_epoch_ms", reflection.generatedAt)
+                                put(
+                                    "generated_at",
+                                    Instant.ofEpochMilli(reflection.generatedAt).toString()
+                                )
+                                put("period_start_epoch_ms", reflection.periodStart)
+                                put("period_end_epoch_ms", reflection.periodEnd)
+                                put("model", reflection.model)
+                                put("text", reflection.text)
+                                put(
+                                    "source_entry_ids",
+                                    JSONArray().apply {
+                                        reflection.sourceIdList().forEach { put(it) }
+                                    }
+                                )
+                            }
+                        )
+                    }
+                }
+            )
         }
         return payload.toString(2)
     }
 
-    /** Human-readable copy, grouped by day. */
+    /**
+     * Human-readable copy, grouped by day, with the reflections and their sources at the end.
+     *
+     * Reflections cite their sources by timestamp rather than by row id: a number means nothing
+     * to someone reading the file, whereas "14 მარტი, 21:40" can be found in the timeline above.
+     */
     fun toMarkdown(
         entries: List<JournalEntry>,
         exportedAt: Long,
+        reflections: List<Reflection> = emptyList(),
         zone: ZoneId = ZoneId.systemDefault()
     ): String = buildString {
         appendLine("# გონების დღიური")
@@ -117,5 +184,36 @@ object JournalExporter {
                     appendLine()
                 }
             }
+
+        if (reflections.isEmpty()) return@buildString
+
+        val byId = entries.associateBy { it.id }
+        appendLine("---")
+        appendLine()
+        appendLine("# რეფლექსიები")
+        appendLine()
+        reflections.sortedBy { it.generatedAt }.forEach { reflection ->
+            val stamp = Instant.ofEpochMilli(reflection.generatedAt).atZone(zone)
+            appendLine("## " + stamp.format(DAY_HEADING) + ", " + stamp.format(CLOCK))
+            appendLine()
+            appendLine(reflection.text.trim())
+            appendLine()
+            if (reflection.model.isNotBlank()) {
+                appendLine("მოდელი: `${reflection.model}`")
+                appendLine()
+            }
+
+            val sources = reflection.sourceIdList().mapNotNull(byId::get).sortedBy { it.createdAt }
+            if (sources.isEmpty()) {
+                appendLine("წყარო ჩანაწერები: არ არის ჩაწერილი")
+            } else {
+                appendLine("წყარო ჩანაწერები (${sources.size}):")
+                sources.forEach { source ->
+                    val at = Instant.ofEpochMilli(source.createdAt).atZone(zone)
+                    appendLine("- " + at.format(SOURCE_STAMP) + " — " + preview(source.content))
+                }
+            }
+            appendLine()
+        }
     }
 }

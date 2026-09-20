@@ -101,7 +101,12 @@ fun SettingsScreen(
 
     var keyDraft by rememberSaveable(aiSettings.apiKey) { mutableStateOf(aiSettings.apiKey) }
     var keyVisible by rememberSaveable { mutableStateOf(false) }
-    var modelDraft by rememberSaveable(aiSettings.model) { mutableStateOf(aiSettings.model) }
+    var tagModelDraft by rememberSaveable(aiSettings.tagModel) {
+        mutableStateOf(aiSettings.tagModel)
+    }
+    var reflectionModelDraft by rememberSaveable(aiSettings.reflectionModel) {
+        mutableStateOf(aiSettings.reflectionModel)
+    }
     var lowPriorityDraft by rememberSaveable(aiSettings.lowPriority) {
         mutableStateOf(aiSettings.lowPriority)
     }
@@ -110,7 +115,8 @@ fun SettingsScreen(
     var confirmRetag by remember { mutableStateOf(false) }
 
     val dirty = keyDraft != aiSettings.apiKey ||
-        modelDraft != aiSettings.model ||
+        tagModelDraft != aiSettings.tagModel ||
+        reflectionModelDraft != aiSettings.reflectionModel ||
         lowPriorityDraft != aiSettings.lowPriority
 
     val exportJson = rememberLauncherForActivityResult(
@@ -269,17 +275,58 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(18.dp))
 
-                // ------------------------------------------------ model picker
+                // ----------------------------------------------- model pickers
                 Text(
-                    text = stringResource(R.string.settings_model_choose),
+                    text = stringResource(R.string.settings_models),
                     style = MaterialTheme.typography.titleSmall,
                     color = TextSecondary
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.settings_models_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = stringResource(R.string.settings_model_tags),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.settings_model_tags_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary
+                )
+                Spacer(Modifier.height(6.dp))
                 ModelPicker(
                     settings = aiSettings,
-                    selectedSlug = modelDraft,
-                    onSelect = { modelDraft = it },
+                    selectedSlug = tagModelDraft,
+                    onSelect = { tagModelDraft = it },
+                    onRemoveCustom = viewModel::removeCustomModel
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = stringResource(R.string.settings_model_reflection),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.settings_model_reflection_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary
+                )
+                Spacer(Modifier.height(6.dp))
+                ModelPicker(
+                    settings = aiSettings,
+                    selectedSlug = reflectionModelDraft,
+                    onSelect = { reflectionModelDraft = it },
                     onRemoveCustom = viewModel::removeCustomModel
                 )
 
@@ -304,7 +351,9 @@ fun SettingsScreen(
                         if (customSlug.isNotBlank()) {
                             IconButton(onClick = {
                                 viewModel.addCustomModel(customSlug)
-                                modelDraft = customSlug.trim()
+                                // Added to the list only — which of the two slots it should
+                                // fill is a choice, and guessing it would silently repoint a
+                                // job the user did not mean to change.
                                 customSlug = ""
                             }) {
                                 Icon(
@@ -354,7 +403,12 @@ fun SettingsScreen(
                 }
                 Button(
                     onClick = {
-                        viewModel.saveAiSettings(keyDraft, modelDraft, lowPriorityDraft)
+                        viewModel.saveAiSettings(
+                            apiKey = keyDraft,
+                            tagModel = tagModelDraft,
+                            reflectionModel = reflectionModelDraft,
+                            lowPriority = lowPriorityDraft
+                        )
                     },
                     enabled = dirty,
                     modifier = Modifier

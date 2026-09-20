@@ -44,6 +44,15 @@ object NotificationHelper {
 
     const val CHANNEL_ID = "journal_prompts_v1"
 
+    /**
+     * Separate channel for "your reflection is ready".
+     *
+     * A prompt is a nudge to write *now* and is worth a heads-up banner; a finished reflection is
+     * something to read whenever. Same-channel would force one importance on both, and the first
+     * time a reflection interrupted someone they would mute the prompts too.
+     */
+    const val INSIGHTS_CHANNEL_ID = "journal_insights_v1"
+
     const val ACTION_SHOW_PROMPT = "com.journal.app.action.SHOW_PROMPT"
     const val ACTION_PLAN_DAY = "com.journal.app.action.PLAN_DAY"
     const val ACTION_INLINE_REPLY = "com.journal.app.action.INLINE_REPLY"
@@ -55,6 +64,18 @@ object NotificationHelper {
 
     /** Tells [MainActivity] to reset navigation to the timeline when opened from a notification. */
     const val EXTRA_OPEN_HOME = "com.journal.app.extra.OPEN_HOME"
+
+    /**
+     * Tells [MainActivity] to open the new-entry sheet, pre-filled with [EXTRA_PROMPT].
+     *
+     * Tapping the body of a prompt notification used to just launch the app onto the timeline,
+     * leaving the user to press **+** and remember the question themselves — the notification had
+     * asked something and then dropped it. This carries the question through.
+     */
+    const val EXTRA_OPEN_COMPOSER = "com.journal.app.extra.OPEN_COMPOSER"
+
+    /** Tells [MainActivity] to land on the Insights tab. */
+    const val EXTRA_OPEN_INSIGHTS = "com.journal.app.extra.OPEN_INSIGHTS"
 
     /** RemoteInput result key — must stay stable, replies are keyed by it. */
     const val KEY_TEXT_REPLY = "com.journal.app.KEY_TEXT_REPLY"
@@ -69,6 +90,7 @@ object NotificationHelper {
     private const val NOTIFICATION_ID_BASE = 2_000
     private const val PROMPT_REQUEST_BASE = 1_000
     private const val REROLL_REQUEST_BASE = 50_000
+    private const val COMPOSER_REQUEST_BASE = 60_000
     private const val PLANNER_REQUEST_CODE = 900
     private const val PLANNER_HOUR = 0
     private const val PLANNER_MINUTE = 5
@@ -76,6 +98,44 @@ object NotificationHelper {
     private const val INEXACT_WINDOW_MILLIS = 5 * 60 * 1000L
     private const val SAVED_TIMEOUT_MILLIS = 25_000L
     private const val PLAN_WORK_NAME = "mind_journal_daily_plan"
+
+    /** Fixed id: there is only ever one "reflection ready", and a second should replace it. */
+    private const val REFLECTION_NOTIFICATION_ID = 3_001
+    private const val REFLECTION_REQUEST_CODE = 3_001
+
+    // ------------------------------------------------ long-text guard rails
+    //
+    // The platform hard-truncates any CharSequence in a notification at
+    // Notification.MAX_CHARSEQUENCE_LENGTH (5 * 1024) and silently drops the rest, so nothing
+    // here prevents a crash — it prevents an *ugly* result. The banner shows a single title line
+    // and ellipsizes it itself; what actually breaks the layout is a newline, which stretches or
+    // splits the collapsed row. So: collapse whitespace for anything that goes on one line, and
+    // send the full text only to BigTextStyle, which is built to scroll.
+
+    /** One-line fields (title, reply history) are collapsed and cut to this. */
+    private const val SINGLE_LINE_MAX_CHARS = 120
+
+    /** Expanded bodies are cut well below the platform limit so the tail is never a hard clip. */
+    private const val BIG_TEXT_MAX_CHARS = 1_800
+
+    private val WHITESPACE = Regex("\\s+")
+
+    /**
+     * Collapses every run of whitespace — including newlines — into single spaces and truncates.
+     *
+     * Used for anything the system renders on one line. A prompt or a reply containing a newline
+     * would otherwise make the collapsed notification row jump in height or clip mid-glyph.
+     */
+    private fun oneLine(text: String, max: Int = SINGLE_LINE_MAX_CHARS): String {
+        val collapsed = text.replace(WHITESPACE, " ").trim()
+        return if (collapsed.length <= max) collapsed else collapsed.take(max - 1).trimEnd() + "…"
+    }
+
+    /** Keeps the line structure (BigTextStyle renders it) but bounds the length. */
+    private fun bounded(text: String, max: Int = BIG_TEXT_MAX_CHARS): String {
+        val trimmed = text.trim()
+        return if (trimmed.length <= max) trimmed else trimmed.take(max - 1).trimEnd() + "…"
+    }
 
     /** The prompt pool. Lives in [PromptBank]; kept here as an alias for call-site brevity. */
     val PROMPTS: List<String> get() = PromptBank.allPrompts
@@ -375,6 +435,68 @@ object NotificationHelper {
         manager.createNotificationChannel(channel)
     }
 
+    /** Quieter channel for finished AI work. Created lazily — most users never trigger it. */
+    fun createInsightsChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(INSIGHTS_CHANNEL_ID) != null) return
+
+        val channel = NotificationChannel(
+            INSIGHTS_CHANNEL_ID,
+            context.getString(R.string.notif_insights_channel_name),
+            // DEFAULT, not HIGH: it posts to the shade without taking over the screen.
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = context.getString(R.string.notif_insights_channel_desc)
+            setShowBadge(true)
+            // A reflection is a summary of the user's private journal — never on the lockscreen.
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    /**
+     * "შენი კვირის რეფლექსია მზად არის" — posted by [WeeklyReflectionWorker] once the background
+     * generation lands. Tapping it opens the Insights tab, where the text actually is.
+     */
+    fun showReflectionReady(context: Context, preview: String? = null) {
+        createInsightsChannel(context)
+
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            data = Uri.parse("mindjournal://insights")
+            putExtra(EXTRA_OPEN_INSIGHTS, true)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            REFLECTION_REQUEST_CODE,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = context.getString(R.string.notif_reflection_ready)
+        val builder = NotificationCompat.Builder(context, INSIGHTS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(context.getString(R.string.notif_reflection_ready_body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setShowWhen(true)
+
+        // The opening lines are enough to decide whether to read it now; the rest is in the app.
+        preview?.takeIf { it.isNotBlank() }?.let {
+            builder.setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(bounded(it))
+                    .setBigContentTitle(title)
+            )
+        }
+
+        post(context, REFLECTION_NOTIFICATION_ID, builder.build())
+    }
+
     /**
      * Posts a prompt notification carrying a [RemoteInput] action, so the entry can be typed and
      * saved from the banner or the lockscreen without ever opening the app, plus a
@@ -386,6 +508,14 @@ object NotificationHelper {
         val replyLabel = context.getString(R.string.notif_reply_hint)
         val remoteInput = RemoteInput.Builder(KEY_TEXT_REPLY)
             .setLabel(replyLabel)
+            // Free-form text is the default, but it is stated here because it is load-bearing:
+            // turning it off would reduce the action to a fixed choice list, and no canned
+            // choice is a journal entry. Note that Android exposes no way to ask the system's
+            // inline-reply editor for a multi-line field — it grows with the text and accepts
+            // newlines from the keyboard, but the height is the shade's decision, not ours.
+            // What is under this app's control is everything the text flows back into, which is
+            // why the display paths below are all length- and newline-guarded.
+            .setAllowFreeFormInput(true)
             .build()
 
         val replyIntent = Intent(context, InlineReplyReceiver::class.java).apply {
@@ -434,10 +564,16 @@ object NotificationHelper {
             .setAllowGeneratedReplies(false)
             .build()
 
-        val notification = baseBuilder(context, notificationId)
-            .setContentTitle(prompt)
+        val notification = baseBuilder(context, composerIntent(context, notificationId, prompt))
+            // Collapsed row: one line, no newlines, bounded. The expanded style carries the
+            // whole question, so nothing is lost — only the row height is kept predictable.
+            .setContentTitle(oneLine(prompt))
             .setContentText(context.getString(R.string.notif_reply_hint))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(prompt))
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(bounded(prompt))
+                    .setSummaryText(context.getString(R.string.notif_reply_hint))
+            )
             .addAction(replyAction)
             .addAction(rerollAction)
             .build()
@@ -461,15 +597,19 @@ object NotificationHelper {
      */
     fun showSaved(context: Context, notificationId: Int, prompt: String?, reply: String) {
         createChannel(context)
-        val title = prompt?.takeIf { it.isNotBlank() } ?: context.getString(R.string.notif_title)
+        val title = prompt?.takeIf { it.isNotBlank() }?.let(::oneLine)
+            ?: context.getString(R.string.notif_title)
 
-        val notification = baseBuilder(context, notificationId)
+        // The entry is already safely in Room at this point, so every cut below is cosmetic —
+        // it shapes the confirmation, never what was stored.
+        val notification = baseBuilder(context, openHomeIntent(context, notificationId))
             .setContentTitle(title)
             .setContentText(context.getString(R.string.notif_saved))
-            .setRemoteInputHistory(arrayOf(reply))
+            // Reply history renders as a single line next to the title.
+            .setRemoteInputHistory(arrayOf(oneLine(reply)))
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText(reply)
+                    .bigText(bounded(reply))
                     .setSummaryText(context.getString(R.string.notif_saved))
             )
             .setOnlyAlertOnce(true)
@@ -480,13 +620,21 @@ object NotificationHelper {
         post(context, notificationId, notification)
     }
 
-    /** Same shell as [showSaved] but reports that persisting the reply failed. */
+    /**
+     * Same shell as [showSaved] but reports that persisting the reply failed.
+     *
+     * The full typed text stays on screen, untruncated as far as the platform allows, because it
+     * is the only remaining copy — the user needs to be able to read it back and retype it.
+     */
     fun showSaveError(context: Context, notificationId: Int, prompt: String?, reply: String) {
         createChannel(context)
-        val notification = baseBuilder(context, notificationId)
-            .setContentTitle(prompt?.takeIf { it.isNotBlank() } ?: context.getString(R.string.notif_title))
+        val notification = baseBuilder(context, openHomeIntent(context, notificationId))
+            .setContentTitle(
+                prompt?.takeIf { it.isNotBlank() }?.let(::oneLine)
+                    ?: context.getString(R.string.notif_title)
+            )
             .setContentText(context.getString(R.string.notif_error))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(reply))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bounded(reply)))
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .build()
@@ -497,24 +645,57 @@ object NotificationHelper {
         NotificationManagerCompat.from(context).cancel(notificationId)
     }
 
-    private fun baseBuilder(context: Context, notificationId: Int): NotificationCompat.Builder {
-        val openIntent = Intent(context, MainActivity::class.java).apply {
+    /** Tap → launch onto the timeline. Used by the post-save confirmations. */
+    private fun openHomeIntent(context: Context, notificationId: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             // Distinct data per notification so FLAG_UPDATE_CURRENT does not collapse these
             // into one PendingIntent that keeps the first notification's extras.
             data = Uri.parse("mindjournal://open/$notificationId")
             putExtra(EXTRA_OPEN_HOME, true)
         }
-        val openPending = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             context,
             notificationId,
-            openIntent,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
 
+    /**
+     * Tap → launch straight into the new-entry sheet with this notification's question at the
+     * top, so the body tap and the inline reply answer the same thing.
+     *
+     * The data URI carries the slot id only; the prompt itself travels as an extra and is
+     * refreshed by `FLAG_UPDATE_CURRENT`, which matters because **🔄 შეცვლა** re-posts the same
+     * notification id with a different question.
+     */
+    private fun composerIntent(
+        context: Context,
+        notificationId: Int,
+        prompt: String
+    ): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            data = Uri.parse("mindjournal://compose/$notificationId")
+            putExtra(EXTRA_OPEN_COMPOSER, true)
+            putExtra(EXTRA_PROMPT, prompt)
+        }
+        return PendingIntent.getActivity(
+            context,
+            COMPOSER_REQUEST_BASE + notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun baseBuilder(
+        context: Context,
+        contentIntent: PendingIntent
+    ): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(openPending)
+            .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

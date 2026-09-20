@@ -17,6 +17,25 @@
     <string name="home_yesterday">გუშინ</string>
     <string name="fab_add">ახალი ჩანაწერი</string>
 
+    <!-- ძიება, ფილტრი და კალენდარი -->
+    <string name="home_search_hint">ძიება ჩანაწერებში…</string>
+    <string name="home_search_clear">ძიების გასუფთავება</string>
+    <string name="home_calendar_toggle">კალენდარი</string>
+    <string name="home_filter_clear">გასუფთავება</string>
+    <string name="home_results">ნაპოვნია</string>
+    <string name="home_no_results">ამ ფილტრით ჩანაწერი ვერ მოიძებნა</string>
+    <string name="calendar_previous_month">წინა თვე</string>
+    <string name="calendar_next_month">შემდეგი თვე</string>
+
+    <!-- თეგები -->
+    <string name="tag_editor_title">თემები</string>
+    <string name="tag_editor_empty">თემა ჯერ არ არის — დაამატე ქვემოთ.</string>
+    <string name="tag_editor_hint">ახალი თემა (მაგ. ძილი)</string>
+    <string name="tag_add">თემის დამატება</string>
+    <string name="tag_remove">%1$s თემის მოშორება</string>
+    <string name="entry_tags_updated">თემები განახლდა</string>
+    <string name="dialog_edit_keep_tags">შენახვის შემდეგ შენ მიერ მითითებული თემები დარჩება.</string>
+
     <!-- ჩანაწერის დამატება -->
     <string name="dialog_new_title">ახალი ჩანაწერი</string>
     <string name="dialog_hint">დაიწყე წერა…</string>
@@ -53,6 +72,20 @@
     <string name="insights_stat_entries">ჩანაწერი</string>
     <string name="insights_stat_week">ამ კვირაში</string>
     <string name="insights_stat_tags">თემა</string>
+    <string name="insights_tags_tappable">დააჭირე თემას, რომ დღიური ამ თემით გაფილტრო.</string>
+    <string name="insights_sources">წყარო ჩანაწერი: %1$d</string>
+    <string name="insights_sources_unknown">წყარო ჩანაწერები ამ რეფლექსიისთვის არ არის ჩაწერილი.</string>
+    <string name="insights_sources_missing">%1$d წყარო ჩანაწერი წაშლილია.</string>
+    <string name="insights_history">წინა რეფლექსიები (%1$d)</string>
+    <string name="insights_history_title">რეფლექსიების ისტორია</string>
+    <string name="insights_see_all">ყველას ნახვა (%1$d)</string>
+    <string name="insights_tags_more">კიდევ %1$d თემა</string>
+    <string name="insights_tags_less">ნაკლების ჩვენება</string>
+    <string name="reflection_marker">კვირის რეფლექსია</string>
+    <string name="reflection_open">რეფლექსიის გახსნა</string>
+    <string name="action_close">დახურვა</string>
+    <string name="insights_reflection_done">რეფლექსია მზადაა — %1$d ჩანაწერიდან</string>
+    <string name="insights_reflection_deleted">რეფლექსია წაიშალა</string>
 
     <!-- გრაფიკის ეკრანი -->
     <string name="config_title">შეტყობინებების გრაფიკი</string>
@@ -95,6 +128,12 @@
     <string name="settings_save_all">პარამეტრების შენახვა</string>
     <string name="settings_api_key_cleared">გასაღები წაიშალა</string>
     <string name="settings_model_choose">აირჩიე მოდელი</string>
+    <string name="settings_models">მოდელები</string>
+    <string name="settings_models_hint">ორი განსხვავებული სამუშაო — ორი მოდელი. თეგები ყოველ ჩანაწერზე გენერირდება, ამიტომ იქ სიიაფე იგებს; რეფლექსია კვირაში ერთხელ იწერება და იქ ხარისხი ჩანს.</string>
+    <string name="settings_model_tags">თეგების მოდელი</string>
+    <string name="settings_model_tags_hint">სწრაფი და იაფი — ყოველი ჩანაწერის თემები და შეკითხვების გენერაცია.</string>
+    <string name="settings_model_reflection">რეფლექსიის მოდელი</string>
+    <string name="settings_model_reflection_hint">უფრო ძლიერი — კვირაში ერთხელ, გრძელი ქართული ტექსტისთვის.</string>
     <string name="settings_model_custom">სხვა მოდელი (OpenRouter slug)</string>
     <string name="settings_model_custom_hint">provider/model-name</string>
     <string name="settings_model_add">სიაში დამატება</string>
@@ -118,6 +157,7 @@
     <string name="settings_import_json">JSON backup-ის იმპორტი</string>
     <string name="settings_import_done">%1$d ახალი ჩანაწერი დაემატა ✓</string>
     <string name="settings_import_none">ყველა ჩანაწერი უკვე არსებობს</string>
+    <string name="settings_import_reflections">%1$d რეფლექსია დაემატა ✓</string>
     <string name="settings_import_wrong_file">ეს ფაილი Mind Journal-ის backup არ არის</string>
     <string name="settings_import_too_new">ფაილი უფრო ახალი ვერსიითაა შექმნილი — განაახლე აპლიკაცია</string>
     <string name="settings_import_empty">ფაილში ჩანაწერები არ არის</string>
@@ -153,6 +193,10 @@
     <string name="notif_reroll_action">🔄 შეცვლა</string>
     <string name="notif_saved">შენახულია ✓</string>
     <string name="notif_error">შენახვა ვერ მოხერხდა</string>
+    <string name="notif_insights_channel_name">AI შედეგები</string>
+    <string name="notif_insights_channel_desc">შეტყობინება მაშინ, როცა კვირის რეფლექსია მზადაა</string>
+    <string name="notif_reflection_ready">შენი კვირის რეფლექსია მზად არის</string>
+    <string name="notif_reflection_ready_body">დააჭირე, რომ „ანალიზში“ წაიკითხო</string>
 
     <!-- საერთო -->
     <string name="error_generic">დაფიქსირდა შეცდომა</string>
