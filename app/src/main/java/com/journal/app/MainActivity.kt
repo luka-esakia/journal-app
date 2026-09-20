@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -33,14 +34,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,11 +77,13 @@ import com.journal.app.ui.theme.TextSecondary
 class MainActivity : FragmentActivity() {
 
     /**
-     * Bumped every time the activity is (re)launched from a notification, so the UI can reset the
-     * bottom-nav selection back to the timeline. A counter rather than a boolean: tapping a
-     * second notification while already on Home must still register as a fresh request.
+     * What the notification that launched (or re-launched) this activity wants to happen.
+     *
+     * [LaunchRequest.sequence] is bumped on every arrival rather than the request being a plain
+     * value, because tapping a second notification while already on the requested screen must
+     * still register — otherwise the second tap does nothing at all.
      */
-    private val homeRequests = mutableIntStateOf(0)
+    private var launchRequest by mutableStateOf(LaunchRequest())
 
     /** Locked state lives in the activity so it survives recomposition but not process death. */
     private var locked by mutableStateOf(false)
@@ -90,7 +96,7 @@ class MainActivity : FragmentActivity() {
 
         val preferences = PreferenceManager.getInstance(this)
         locked = preferences.appLockEnabled.value && AppLock.canLock(this)
-        consumeHomeRequest(intent)
+        consumeLaunchRequest(intent)
 
         setContent {
             val viewModel: JournalViewModel = viewModel(factory = JournalViewModel.Factory)
@@ -102,7 +108,7 @@ class MainActivity : FragmentActivity() {
                 } else {
                     JournalApp(
                         viewModel = viewModel,
-                        homeRequest = homeRequests.intValue
+                        launchRequest = launchRequest
                     )
                 }
             }
@@ -118,7 +124,7 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        consumeHomeRequest(intent)
+        consumeLaunchRequest(intent)
     }
 
     override fun onStop() {
@@ -142,12 +148,34 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun consumeHomeRequest(intent: Intent?) {
-        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_HOME, false) == true) {
-            homeRequests.intValue += 1
-            // Clear it so a configuration change does not replay the navigation.
-            intent.removeExtra(NotificationHelper.EXTRA_OPEN_HOME)
-        }
+    /**
+     * Turns a notification's extras into a one-shot navigation request.
+     *
+     * Every extra is removed once read, so a configuration change — which re-delivers the same
+     * intent — does not replay the navigation and yank the user off whatever they moved to.
+     */
+    private fun consumeLaunchRequest(intent: Intent?) {
+        intent ?: return
+        val openComposer = intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_COMPOSER, false)
+        val openInsights = intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_INSIGHTS, false)
+        val openHome = intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_HOME, false)
+        if (!openComposer && !openInsights && !openHome) return
+
+        val prompt = intent.getStringExtra(NotificationHelper.EXTRA_PROMPT)
+        intent.removeExtra(NotificationHelper.EXTRA_OPEN_COMPOSER)
+        intent.removeExtra(NotificationHelper.EXTRA_OPEN_INSIGHTS)
+        intent.removeExtra(NotificationHelper.EXTRA_OPEN_HOME)
+        intent.removeExtra(NotificationHelper.EXTRA_PROMPT)
+
+        launchRequest = LaunchRequest(
+            sequence = launchRequest.sequence + 1,
+            target = when {
+                openComposer -> LaunchTarget.COMPOSER
+                openInsights -> LaunchTarget.INSIGHTS
+                else -> LaunchTarget.HOME
+            },
+            prompt = prompt
+        )
     }
 
     private fun promptForUnlock() {
@@ -172,6 +200,18 @@ class MainActivity : FragmentActivity() {
     }
 }
 
+/** Where a notification tap should land. */
+private enum class LaunchTarget { HOME, COMPOSER, INSIGHTS }
+
+/**
+ * A notification's navigation request. [sequence] `0` means "launched normally, do nothing".
+ */
+private data class LaunchRequest(
+    val sequence: Int = 0,
+    val target: LaunchTarget = LaunchTarget.HOME,
+    val prompt: String? = null
+)
+
 /** The four destinations, each with its Georgian label and icon. */
 private enum class Destination(
     val route: String,
@@ -187,7 +227,7 @@ private enum class Destination(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun JournalApp(viewModel: JournalViewModel, homeRequest: Int) {
+private fun JournalApp(viewModel: JournalViewModel, launchRequest: LaunchRequest) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination
@@ -200,15 +240,26 @@ private fun JournalApp(viewModel: JournalViewModel, homeRequest: Int) {
 
     RequestNotificationPermission()
 
-    // Opening the app from a notification always lands on the timeline — the entry you just
-    // wrote is the thing you want to see, not whichever tab you left open days ago.
-    LaunchedEffect(homeRequest) {
-        if (homeRequest > 0 && current != Destination.HOME) {
-            navController.navigate(Destination.HOME.route) {
+    // Opening the app from a notification lands where that notification pointed, never on
+    // whichever tab was left open days ago. Keyed on the sequence so a repeat tap still fires.
+    LaunchedEffect(launchRequest.sequence) {
+        if (launchRequest.sequence == 0) return@LaunchedEffect
+
+        val destination = when (launchRequest.target) {
+            LaunchTarget.INSIGHTS -> Destination.INSIGHTS
+            LaunchTarget.HOME, LaunchTarget.COMPOSER -> Destination.HOME
+        }
+        if (destination != current) {
+            navController.navigate(destination.route) {
                 popUpTo(navController.graph.findStartDestination().id) { saveState = false }
                 launchSingleTop = true
                 restoreState = false
             }
+        }
+        // The sheet lives in the view model precisely so it can be opened from out here, after
+        // the tab switch, with the question the notification was asking already in place.
+        if (launchRequest.target == LaunchTarget.COMPOSER) {
+            viewModel.openComposer(launchRequest.prompt)
         }
     }
 
@@ -270,12 +321,7 @@ private fun JournalApp(viewModel: JournalViewModel, homeRequest: Int) {
                                 contentDescription = stringResource(destination.labelRes)
                             )
                         },
-                        label = {
-                            Text(
-                                text = stringResource(destination.labelRes),
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
+                        label = { NavigationLabel(text = stringResource(destination.labelRes)) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -300,7 +346,24 @@ private fun JournalApp(viewModel: JournalViewModel, homeRequest: Int) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 composable(Destination.HOME.route) { HomeScreen(viewModel = viewModel) }
-                composable(Destination.INSIGHTS.route) { InsightsScreen(viewModel = viewModel) }
+                composable(Destination.INSIGHTS.route) {
+                    InsightsScreen(
+                        viewModel = viewModel,
+                        // A tag in the tag cloud is a shortcut into the timeline, so tapping it
+                        // has to take the user there — filtering a list they cannot see would
+                        // look like the tap did nothing.
+                        onOpenTag = { tag ->
+                            viewModel.setTagFilter(tag)
+                            navController.navigate(Destination.HOME.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
                 composable(Destination.SCHEDULE.route) {
                     NotificationConfigScreen(viewModel = viewModel)
                 }
@@ -309,6 +372,66 @@ private fun JournalApp(viewModel: JournalViewModel, homeRequest: Int) {
         }
     }
 }
+
+/**
+ * A bottom-nav label that shrinks to fit instead of wrapping.
+ *
+ * `პარამეტრები` is eleven Mkhedruli glyphs in a cell that is a quarter of the screen minus the
+ * bar's own padding. On a 1440px-wide S24 Ultra that fits at 11sp; on a narrower or
+ * higher-density phone (the report was a OnePlus) it is a few pixels too wide, and Compose wraps
+ * it — pushing the trailing `ი` onto a second line and making that one item taller than the
+ * other three.
+ *
+ * Neither obvious fix is acceptable on its own: `maxLines = 1` with ellipsis turns the label into
+ * `პარამეტრებ…`, and `softWrap = false` lets it run under the neighbouring item. Georgian has no
+ * abbreviation convention that would let the string be shortened either.
+ *
+ * So the text is measured against the cell it was actually given and the largest size that fits
+ * on one line is used, stepping down 0.5sp at a time to a floor of 8.5sp. Every other label is
+ * short enough that it never leaves 11sp, so only the offending one changes — and it changes by
+ * the smallest amount that device needs rather than by a constant guess. Compose 1.7 has no
+ * `autoSize` parameter, which is why this is measured by hand.
+ */
+@Composable
+private fun NavigationLabel(text: String) {
+    val base = MaterialTheme.typography.labelSmall
+    val measurer = rememberTextMeasurer()
+
+    BoxWithConstraints(contentAlignment = Alignment.Center) {
+        val availablePx = constraints.maxWidth
+        val style = remember(text, availablePx, base) {
+            if (availablePx <= 0) {
+                base
+            } else {
+                generateSequence(base.fontSize.value) { it - LABEL_STEP_SP }
+                    .takeWhile { it >= LABEL_MIN_SP }
+                    .map { base.copy(fontSize = it.sp) }
+                    .firstOrNull { candidate ->
+                        measurer.measure(
+                            text = text,
+                            style = candidate,
+                            maxLines = 1,
+                            softWrap = false
+                        ).size.width <= availablePx
+                    }
+                    ?: base.copy(fontSize = LABEL_MIN_SP.sp)
+            }
+        }
+        Text(
+            text = text,
+            style = style,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible
+        )
+    }
+}
+
+/** Shrink granularity — finer than this is invisible, coarser overshoots. */
+private const val LABEL_STEP_SP = 0.5f
+
+/** Below this the label stops being readable, so overflow is preferable to shrinking further. */
+private const val LABEL_MIN_SP = 8.5f
 
 /**
  * Asks for POST_NOTIFICATIONS once on first composition (Android 13+). Without it the whole

@@ -1,19 +1,45 @@
 package com.journal.app.data.export
 
 import com.journal.app.data.local.JournalEntry
+import com.journal.app.data.local.Reflection
 import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * A reflection as it appeared in the file, with the source ids the exporting device used.
+ *
+ * Those ids are meaningless locally — [com.journal.app.data.repository.JournalRepository] maps
+ * them onto the rows the entries become here — so they are kept out of [reflection] itself,
+ * where they would look authoritative.
+ */
+data class ParsedReflection(
+    val reflection: Reflection,
+    val sourceIds: List<Long>
+) {
+    val generatedAt: Long get() = reflection.generatedAt
+    val text: String get() = reflection.text
+}
 
 /** Outcome of parsing a backup file, before anything touches the database. */
 data class ParsedBackup(
     val entries: List<JournalEntry>,
+    /**
+     * The id each entry carried in the file, positionally parallel to [entries].
+     *
+     * Separate from the entries themselves so [entries] can keep `id = 0` — the guarantee that
+     * an import can never address, let alone overwrite, an existing local row. These are only
+     * ever used as lookup keys when re-pointing reflection source links.
+     */
+    val sourceIds: List<Long>,
+    val reflections: List<ParsedReflection>,
     val formatVersion: Int
 )
 
 /** How an import went. */
 data class ImportResult(
     val imported: Int,
-    val skipped: Int
+    val skipped: Int,
+    val importedReflections: Int = 0
 )
 
 class ImportException(message: String) : Exception(message)
@@ -25,6 +51,9 @@ class ImportException(message: String) : Exception(message)
  * its own), and an entry whose timestamp and text already exist is skipped. Importing the same
  * backup twice therefore changes nothing, and importing an older backup alongside newer entries
  * merges rather than replaces. Nothing is ever deleted by an import.
+ *
+ * File ids are still *reported*, in [ParsedBackup.sourceIds], purely so reflection source links
+ * can be re-pointed at whatever rows the entries turn into. They never reach a write.
  */
 object JournalImporter {
 
@@ -58,15 +87,58 @@ object JournalImporter {
         val array = root.optJSONArray("entries")
             ?: throw ImportException("no-entries")
 
-        val entries = buildList {
-            for (i in 0 until array.length()) {
-                val item = array.optJSONObject(i) ?: continue
-                parseEntry(item)?.let(::add)
-            }
+        val entries = mutableListOf<JournalEntry>()
+        val sourceIds = mutableListOf<Long>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val entry = parseEntry(item) ?: continue
+            entries += entry
+            // 0 when the file predates ids or the field is missing — matches nothing, so a
+            // reflection pointing at it simply drops that source rather than aliasing row 0.
+            sourceIds += item.optLong("id", 0L)
         }
         if (entries.isEmpty()) throw ImportException("no-entries")
 
-        return ParsedBackup(entries = entries, formatVersion = version)
+        // Absent in v1 files, which is not an error — those backups simply had no reflections.
+        val reflections = root.optJSONArray("reflections")?.let(::parseReflections).orEmpty()
+
+        return ParsedBackup(
+            entries = entries,
+            sourceIds = sourceIds,
+            reflections = reflections,
+            formatVersion = version
+        )
+    }
+
+    private fun parseReflections(array: JSONArray): List<ParsedReflection> = buildList {
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val text = item.optString("text").takeIf { it.isNotBlank() } ?: continue
+            val generatedAt = item.optLong("generated_at_epoch_ms", 0L)
+            if (generatedAt <= 0L) continue
+
+            add(
+                ParsedReflection(
+                    reflection = Reflection(
+                        id = 0L,
+                        text = text,
+                        generatedAt = generatedAt,
+                        periodStart = item.optLong("period_start_epoch_ms", 0L),
+                        periodEnd = item.optLong("period_end_epoch_ms", generatedAt),
+                        // Filled in by the repository once the local ids are known.
+                        sourceEntryIds = "",
+                        model = item.optString("model")
+                    ),
+                    sourceIds = item.optJSONArray("source_entry_ids")?.let(::readIds).orEmpty()
+                )
+            )
+        }
+    }
+
+    private fun readIds(array: JSONArray): List<Long> = buildList {
+        for (i in 0 until array.length()) {
+            array.optLong(i, 0L).takeIf { it > 0L }?.let(::add)
+        }
     }
 
     private fun parseEntry(item: JSONObject): JournalEntry? {

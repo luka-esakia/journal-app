@@ -1,8 +1,11 @@
 package com.journal.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,14 +23,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,8 +61,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journal.app.R
 import com.journal.app.data.local.JournalEntry
+import com.journal.app.ui.FeedFilter
 import com.journal.app.ui.JournalViewModel
 import com.journal.app.ui.components.EntryCard
+import com.journal.app.ui.components.JournalCalendar
+import com.journal.app.ui.components.SectionCard
+import com.journal.app.ui.components.TagEditor
 import com.journal.app.ui.components.formatDayHeader
 import com.journal.app.ui.theme.CardSurface
 import com.journal.app.ui.theme.TextSecondary
@@ -63,19 +75,23 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** Timeline of every entry, newest first, grouped by day, plus the quick-add sheet. */
+/** Timeline of every entry, newest first, grouped by day, plus search, filters and quick-add. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: JournalViewModel,
     modifier: Modifier = Modifier
 ) {
-    val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val allEntries by viewModel.entries.collectAsStateWithLifecycle()
+    val entries by viewModel.visibleEntries.collectAsStateWithLifecycle()
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val dayCounts by viewModel.dayCounts.collectAsStateWithLifecycle()
     val quickPrompt by viewModel.quickAddPrompt.collectAsStateWithLifecycle()
     val promptLoading by viewModel.promptLoading.collectAsStateWithLifecycle()
+    val sheetOpen by viewModel.composerOpen.collectAsStateWithLifecycle()
 
-    var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
+    var calendarOpen by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<JournalEntry?>(null) }
     var editing by remember { mutableStateOf<JournalEntry?>(null) }
 
@@ -83,18 +99,62 @@ fun HomeScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
 
-        if (entries.isEmpty()) {
-            EmptyTimeline(modifier = Modifier.fillMaxSize())
-        } else {
-            Timeline(
-                entries = entries,
-                onDelete = { pendingDelete = it },
-                onEdit = { editing = it }
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            SearchAndFilterBar(
+                filter = filter,
+                calendarOpen = calendarOpen,
+                onQueryChange = viewModel::setSearchQuery,
+                onToggleCalendar = { calendarOpen = !calendarOpen },
+                onClearFilter = {
+                    viewModel.clearFilter()
+                    calendarOpen = false
+                },
+                onClearTag = { viewModel.setTagFilter(null) },
+                onClearDate = { viewModel.setDateFilter(null) }
             )
+
+            AnimatedVisibility(visible = calendarOpen) {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp)
+                ) {
+                    JournalCalendar(
+                        dayCounts = dayCounts,
+                        selectedDate = filter.date,
+                        onSelectDate = viewModel::setDateFilter
+                    )
+                }
+            }
+
+            when {
+                // "Nothing written yet" and "nothing matches" are different problems and need
+                // different answers — offering to clear a filter you do not have is noise.
+                allEntries.isEmpty() -> EmptyTimeline(modifier = Modifier.fillMaxSize())
+
+                entries.isEmpty() -> NoResults(
+                    onClear = {
+                        viewModel.clearFilter()
+                        calendarOpen = false
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                else -> Timeline(
+                    entries = entries,
+                    // A relevance-ranked list must not be chopped into day groups: the headers
+                    // would claim an order the list does not have.
+                    grouped = !filter.isSearching(),
+                    activeTag = filter.tag,
+                    onDelete = { pendingDelete = it },
+                    onEdit = { editing = it },
+                    onTagClick = viewModel::toggleTagFilter
+                )
+            }
         }
 
         FloatingActionButton(
-            onClick = { sheetOpen = true },
+            onClick = { viewModel.openComposer() },
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
             shape = RoundedCornerShape(18.dp),
@@ -112,7 +172,7 @@ fun HomeScreen(
     if (sheetOpen) {
         ModalBottomSheet(
             onDismissRequest = {
-                sheetOpen = false
+                viewModel.closeComposer()
                 draft = ""
             },
             sheetState = sheetState,
@@ -128,13 +188,13 @@ fun HomeScreen(
                 onGenerateAi = viewModel::generateAiPrompt,
                 onClearPrompt = viewModel::clearPrompt,
                 onCancel = {
-                    sheetOpen = false
+                    viewModel.closeComposer()
                     draft = ""
                 },
                 onSave = {
+                    // addEntry closes the sheet itself once the write lands.
                     viewModel.addEntry(draft, quickPrompt)
                     draft = ""
-                    sheetOpen = false
                 }
             )
         }
@@ -150,12 +210,22 @@ fun HomeScreen(
             EditEntrySheet(
                 entry = entry,
                 onCancel = { editing = null },
-                onSave = { text, keepPrompt ->
-                    viewModel.editEntry(
-                        id = entry.id,
-                        content = text,
-                        prompt = entry.prompt.takeIf { keepPrompt }
-                    )
+                onSave = { text, keepPrompt, tags ->
+                    val bodyChanged = text != entry.content ||
+                        keepPrompt != (entry.prompt != null)
+                    if (!bodyChanged && tags != null) {
+                        // Tags-only edit. Routing this through editEntry would stamp `edited_at`
+                        // and mark the card „რედაქტირებული" for a change to its topics, which
+                        // is not what that badge claims.
+                        viewModel.updateTags(entry.id, tags)
+                    } else {
+                        viewModel.editEntry(
+                            id = entry.id,
+                            content = text,
+                            prompt = entry.prompt.takeIf { keepPrompt },
+                            tags = tags
+                        )
+                    }
                     editing = null
                 }
             )
@@ -194,17 +264,157 @@ fun HomeScreen(
     }
 }
 
+/**
+ * The search field, the calendar toggle, and a chip per active filter.
+ *
+ * Each dimension gets its own dismissible chip rather than one blanket "clear": having narrowed
+ * to `#ძილი` on the 3rd, dropping just the date is the common next move, and a single clear
+ * would throw away the part the user wanted to keep. **გასუფთავება** is offered as well, for
+ * when everything should go.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun SearchAndFilterBar(
+    filter: FeedFilter,
+    calendarOpen: Boolean,
+    onQueryChange: (String) -> Unit,
+    onToggleCalendar: () -> Unit,
+    onClearFilter: () -> Unit,
+    onClearTag: () -> Unit,
+    onClearDate: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = filter.query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(
+                        text = stringResource(R.string.home_search_hint),
+                        color = TextTertiary
+                    )
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                shape = RoundedCornerShape(12.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Search,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (filter.query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.home_search_clear),
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            )
+            Spacer(Modifier.width(6.dp))
+            IconButton(onClick = onToggleCalendar, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Outlined.CalendarMonth,
+                    contentDescription = stringResource(R.string.home_calendar_toggle),
+                    tint = if (calendarOpen || filter.date != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        TextSecondary
+                    },
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        if (!filter.isActive()) return@Column
+
+        Spacer(Modifier.height(6.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            filter.tag?.let { tag ->
+                DismissibleFilterChip(label = tag, onDismiss = onClearTag)
+            }
+            filter.date?.let { date ->
+                DismissibleFilterChip(label = formatDayHeader(date), onDismiss = onClearDate)
+            }
+            FilterChip(
+                selected = false,
+                onClick = onClearFilter,
+                label = {
+                    Text(
+                        text = stringResource(R.string.home_filter_clear),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                },
+                shape = RoundedCornerShape(999.dp),
+                colors = FilterChipDefaults.filterChipColors(labelColor = TextSecondary)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DismissibleFilterChip(label: String, onDismiss: () -> Unit) {
+    FilterChip(
+        selected = true,
+        onClick = onDismiss,
+        label = {
+            Text(text = label, style = MaterialTheme.typography.labelMedium)
+        },
+        trailingIcon = {
+            Icon(
+                imageVector = Icons.Outlined.Close,
+                contentDescription = stringResource(R.string.home_filter_clear),
+                modifier = Modifier.size(14.dp)
+            )
+        },
+        shape = RoundedCornerShape(999.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+            selectedLabelColor = MaterialTheme.colorScheme.primary,
+            selectedTrailingIconColor = MaterialTheme.colorScheme.primary
+        )
+    )
+}
+
 @Composable
 private fun Timeline(
     entries: List<JournalEntry>,
+    grouped: Boolean,
+    activeTag: String?,
     onDelete: (JournalEntry) -> Unit,
     onEdit: (JournalEntry) -> Unit,
+    onTagClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val zone = remember { ZoneId.systemDefault() }
     // Entries arrive newest-first from Room; grouping preserves that order.
-    val grouped = remember(entries) {
-        entries.groupBy { Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() }
+    val groups = remember(entries, grouped) {
+        if (grouped) {
+            entries.groupBy { Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() }
+        } else {
+            emptyMap()
+        }
     }
     val today = remember(entries) { LocalDate.now(zone) }
 
@@ -213,19 +423,43 @@ private fun Timeline(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        grouped.forEach { (date, dayEntries) ->
-            item(key = "header-$date") {
+        if (grouped) {
+            groups.forEach { (date, dayEntries) ->
+                item(key = "header-$date") {
+                    DayHeader(
+                        label = when (date) {
+                            today -> stringResource(R.string.home_today)
+                            today.minusDays(1) -> stringResource(R.string.home_yesterday)
+                            else -> formatDayHeader(date)
+                        },
+                        count = dayEntries.size
+                    )
+                }
+                items(items = dayEntries, key = { it.id }) { entry ->
+                    EntryCard(
+                        entry = entry,
+                        onDelete = onDelete,
+                        onEdit = onEdit,
+                        onTagClick = onTagClick,
+                        activeTag = activeTag
+                    )
+                }
+            }
+        } else {
+            item(key = "result-count") {
                 DayHeader(
-                    label = when (date) {
-                        today -> stringResource(R.string.home_today)
-                        today.minusDays(1) -> stringResource(R.string.home_yesterday)
-                        else -> formatDayHeader(date)
-                    },
-                    count = dayEntries.size
+                    label = stringResource(R.string.home_results),
+                    count = entries.size
                 )
             }
-            items(items = dayEntries, key = { it.id }) { entry ->
-                EntryCard(entry = entry, onDelete = onDelete, onEdit = onEdit)
+            items(items = entries, key = { it.id }) { entry ->
+                EntryCard(
+                    entry = entry,
+                    onDelete = onDelete,
+                    onEdit = onEdit,
+                    onTagClick = onTagClick,
+                    activeTag = activeTag
+                )
             }
         }
     }
@@ -281,21 +515,61 @@ private fun EmptyTimeline(modifier: Modifier = Modifier) {
     }
 }
 
+/** The journal is not empty, the filter just matched nothing. */
+@Composable
+private fun NoResults(onClear: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.SearchOff,
+            contentDescription = null,
+            tint = TextTertiary,
+            modifier = Modifier.size(48.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.home_no_results),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(12.dp))
+        TextButton(onClick = onClear) {
+            Text(
+                text = stringResource(R.string.home_filter_clear),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
 /**
- * Edits an existing entry.
+ * Edits an existing entry: its text, whether it keeps its prompt, and its tags.
  *
- * Saving clears the entry's tags and re-queues it for analysis, since topics derived from the old
- * wording would otherwise stick around. The original prompt can be kept or dropped, but not
- * swapped — rerolling the question of an entry already written against it only causes confusion.
+ * Tags are only sent back when the user actually touched them. Left alone, saving clears them
+ * and re-queues the entry for analysis, since topics derived from the old wording would linger;
+ * touched, they are kept verbatim and the LLM is not allowed to overwrite the correction. The
+ * original prompt can be kept or dropped, but not swapped — rerolling the question of an entry
+ * already written against it only causes confusion.
  */
 @Composable
 private fun EditEntrySheet(
     entry: JournalEntry,
     onCancel: () -> Unit,
-    onSave: (String, Boolean) -> Unit
+    onSave: (String, Boolean, List<String>?) -> Unit
 ) {
     var text by rememberSaveable(entry.id) { mutableStateOf(entry.content) }
     var keepPrompt by rememberSaveable(entry.id) { mutableStateOf(entry.prompt != null) }
+    // Plain remember, not rememberSaveable: a List is not Bundle-storable, and the sheet's own
+    // open/closed state is not saved either, so there is nothing for it to be restored into.
+    var tags by remember(entry.id) { mutableStateOf(entry.tagList()) }
+    var tagsTouched by remember(entry.id) { mutableStateOf(false) }
+
+    val dirty = text != entry.content ||
+        keepPrompt != (entry.prompt != null) ||
+        tagsTouched
 
     Column(
         modifier = Modifier
@@ -358,9 +632,27 @@ private fun EditEntrySheet(
             )
         )
 
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text = stringResource(R.string.tag_editor_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = TextSecondary
+        )
+        Spacer(Modifier.height(8.dp))
+        TagEditor(
+            tags = tags,
+            onTagsChange = {
+                tags = it
+                tagsTouched = true
+            }
+        )
+
         Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.dialog_edit_retag),
+            text = stringResource(
+                if (tagsTouched) R.string.dialog_edit_keep_tags else R.string.dialog_edit_retag
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = TextTertiary
         )
@@ -374,12 +666,12 @@ private fun EditEntrySheet(
             }
             Spacer(Modifier.width(4.dp))
             TextButton(
-                onClick = { onSave(text, keepPrompt) },
-                enabled = text.isNotBlank() && (text != entry.content || keepPrompt != (entry.prompt != null))
+                onClick = { onSave(text, keepPrompt, tags.takeIf { tagsTouched }) },
+                enabled = text.isNotBlank() && dirty
             ) {
                 Text(
                     text = stringResource(R.string.action_save),
-                    color = if (text.isNotBlank()) {
+                    color = if (text.isNotBlank() && dirty) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         TextTertiary
@@ -393,7 +685,8 @@ private fun EditEntrySheet(
 /**
  * Quick-add. The entry itself is the whole point, so the sheet opens with **no prompt** and an
  * empty body. A prompt is opt-in: 🎲 draws one from the local bank (free, instant), ✨ asks the
- * LLM for one informed by recent topics.
+ * LLM for one informed by recent topics — and a notification body tap arrives with its own
+ * question already in place.
  */
 @Composable
 private fun QuickAddSheet(

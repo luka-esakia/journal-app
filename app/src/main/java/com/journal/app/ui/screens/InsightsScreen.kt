@@ -1,6 +1,8 @@
 package com.journal.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -19,23 +21,33 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journal.app.R
+import com.journal.app.data.local.JournalEntry
+import com.journal.app.data.local.Reflection
 import com.journal.app.ui.JournalViewModel
 import com.journal.app.ui.components.SectionCard
 import com.journal.app.ui.components.TagChip
@@ -44,20 +56,23 @@ import com.journal.app.ui.theme.CardBorder
 import com.journal.app.ui.theme.TextSecondary
 import com.journal.app.ui.theme.TextTertiary
 
-/** AI output: semantic topic tags across all entries, and the weekly reflection. */
+/** AI output: semantic topic tags across all entries, and the weekly reflections. */
 @Composable
 fun InsightsScreen(
     viewModel: JournalViewModel,
+    /** Filters the timeline by a tag and switches to it — a tag here is a shortcut, not a view. */
+    onOpenTag: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val tagCounts by viewModel.tagCounts.collectAsStateWithLifecycle()
     val pending by viewModel.unanalyzedCount.collectAsStateWithLifecycle()
-    val reflection by viewModel.weeklyReflection.collectAsStateWithLifecycle()
+    val reflections by viewModel.reflections.collectAsStateWithLifecycle()
     val aiSettings by viewModel.aiSettings.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
 
     val aiUsable = aiSettings.isUsable()
+    val latest = reflections.firstOrNull()
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -108,7 +123,13 @@ fun InsightsScreen(
                         color = TextTertiary
                     )
                 } else {
-                    TagCloud(tagCounts = tagCounts)
+                    TagCloud(tagCounts = tagCounts, onTagClick = onOpenTag)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = stringResource(R.string.insights_tags_tappable),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextTertiary
+                    )
                 }
 
                 // Always rendered and always pressable: a disabled button is indistinguishable
@@ -150,27 +171,17 @@ fun InsightsScreen(
 
         item {
             SectionCard(title = stringResource(R.string.insights_weekly)) {
-                val current = reflection
-                if (current == null) {
+                if (latest == null) {
                     Text(
                         text = stringResource(R.string.insights_weekly_empty),
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextTertiary
                     )
                 } else {
-                    Text(
-                        text = current.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = stringResource(
-                            R.string.insights_updated,
-                            formatShortDateTime(current.generatedAt)
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextTertiary
+                    ReflectionBody(
+                        reflection = latest,
+                        sources = viewModel.sourceEntriesOf(latest),
+                        onDelete = { viewModel.deleteReflection(latest) }
                     )
                 }
 
@@ -220,19 +231,174 @@ fun InsightsScreen(
                 }
             }
         }
+
+        // Reflections used to overwrite each other in a single preference slot; now each one is
+        // its own row, so the older ones are worth showing rather than silently discarding.
+        val history = reflections.drop(1)
+        if (history.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.insights_history, history.size),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            items(count = history.size, key = { history[it].id }) { index ->
+                val reflection = history[index]
+                SectionCard {
+                    ReflectionBody(
+                        reflection = reflection,
+                        sources = viewModel.sourceEntriesOf(reflection),
+                        onDelete = { viewModel.deleteReflection(reflection) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One reflection: the text, when and by which model it was made, and the entries behind it.
+ *
+ * The source list is collapsed by default. It is the answer to "where did this come from" —
+ * asked occasionally, and never while reading the reflection itself.
+ */
+@Composable
+private fun ReflectionBody(
+    reflection: Reflection,
+    sources: List<JournalEntry>,
+    onDelete: () -> Unit
+) {
+    var sourcesOpen by remember(reflection.id) { mutableStateOf(false) }
+    val recorded = reflection.sourceCount()
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = reflection.text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(
+                        R.string.insights_updated,
+                        formatShortDateTime(reflection.generatedAt)
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary
+                )
+                if (reflection.model.isNotBlank()) {
+                    Text(
+                        text = reflection.model,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextTertiary
+                    )
+                }
+            }
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = stringResource(R.string.action_delete),
+                    tint = TextTertiary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        when {
+            // Pre-v3 reflections predate source tracking. Saying so beats an empty list that
+            // looks like the reflection came from nothing.
+            recorded == 0 -> Text(
+                text = stringResource(R.string.insights_sources_unknown),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary
+            )
+
+            else -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { sourcesOpen = !sourcesOpen }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.insights_sources, recorded),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = if (sourcesOpen) {
+                            Icons.Outlined.ExpandLess
+                        } else {
+                            Icons.Outlined.ExpandMore
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = sourcesOpen) {
+                    Column(modifier = Modifier.padding(top = 4.dp)) {
+                        // Fewer resolved than recorded means entries were deleted after the
+                        // reflection was written. The link survives that; the entry does not.
+                        if (sources.size < recorded) {
+                            Text(
+                                text = stringResource(
+                                    R.string.insights_sources_missing,
+                                    recorded - sources.size
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextTertiary
+                            )
+                            Spacer(Modifier.height(6.dp))
+                        }
+                        sources.forEach { source ->
+                            Row(modifier = Modifier.padding(vertical = 3.dp)) {
+                                Text(
+                                    text = formatShortDateTime(source.createdAt),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextTertiary,
+                                    modifier = Modifier.width(92.dp)
+                                )
+                                Text(
+                                    text = source.content.replace('\n', ' ').take(90),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontStyle = FontStyle.Italic,
+                                    color = TextSecondary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagCloud(tagCounts: List<Pair<String, Int>>) {
+private fun TagCloud(
+    tagCounts: List<Pair<String, Int>>,
+    onTagClick: (String) -> Unit
+) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         tagCounts.forEach { (tag, count) ->
-            TagChip(tag = tag, count = count)
+            TagChip(tag = tag, count = count, onClick = { onTagClick(tag) })
         }
     }
 }

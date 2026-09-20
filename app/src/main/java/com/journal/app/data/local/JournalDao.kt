@@ -43,6 +43,12 @@ interface JournalDao {
     @Query("SELECT COUNT(*) FROM journal_entries WHERE analyzed = 0")
     fun observeUnanalyzedCount(): Flow<Int>
 
+    /**
+     * Stores tags and marks the entry analyzed.
+     *
+     * Used both by the LLM and by hand-edited tags — in both cases `analyzed = 1` is what stops
+     * the background tagger from coming back later and overwriting them.
+     */
     @Query("UPDATE journal_entries SET tags = :tags, analyzed = 1 WHERE id = :id")
     suspend fun applyTags(id: Long, tags: String)
 
@@ -66,6 +72,16 @@ interface JournalDao {
     /** Duplicate probe for imports: same instant and same text means the same entry. */
     @Query("SELECT COUNT(*) FROM journal_entries WHERE created_at = :createdAt AND content = :content")
     suspend fun countMatching(createdAt: Long, content: String): Int
+
+    /**
+     * The local id of an already-present entry, so an import can still link a reflection to a row
+     * it skipped as a duplicate.
+     */
+    @Query(
+        "SELECT id FROM journal_entries WHERE created_at = :createdAt AND content = :content " +
+            "LIMIT 1"
+    )
+    suspend fun idOf(createdAt: Long, content: String): Long?
 
     @Query("DELETE FROM journal_entries")
     suspend fun deleteAll()

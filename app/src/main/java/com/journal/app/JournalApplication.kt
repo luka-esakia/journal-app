@@ -4,6 +4,7 @@ import android.app.Application
 import com.journal.app.data.local.PreferenceManager
 import com.journal.app.data.repository.JournalRepository
 import com.journal.app.notification.NotificationHelper
+import com.journal.app.notification.WeeklyReflectionWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,10 @@ class JournalApplication : Application() {
             if (preferences.currentConfig().enabled) {
                 NotificationHelper.planDay(this@JournalApplication)
             }
+            // Enqueued unconditionally; the worker itself no-ops when AI is off or unconfigured.
+            // Gating it here instead would mean the schedule never appears for someone who adds
+            // their API key later without restarting the process.
+            WeeklyReflectionWorker.ensureScheduled(this@JournalApplication)
         }
     }
 }
