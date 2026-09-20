@@ -266,6 +266,46 @@ that device needs. (Compose 1.7 has no `autoSize`, hence measuring by hand.)
 
 ---
 
+## Installing — which APK
+
+CI uploads **two** artifacts and they are *different apps*, not two copies of one:
+
+| Artifact | Package | Size | Use it for |
+|---|---|---|---|
+| `mind-journal-release` | `com.journal.app` | ~2.5 MiB | **everyday use, and anything you hand to someone else** |
+| `mind-journal-debug` | `com.journal.app.debug` | ~19 MiB | development only |
+
+The `.debug` suffix (`applicationIdSuffix`, set since the first commit) exists so both can sit on
+one phone during development. The size gap is just `isMinifyEnabled` + `isShrinkResources` being
+release-only — unminified `material-icons-extended` is most of those extra 16 MiB.
+
+**Pick one and stay on it.** Installing the other one does not update your app; Android sees an
+unrelated package, installs it alongside, and you get an empty journal plus *two* copies both
+firing prompts. Nothing is lost when this happens — the entries are still in whichever package
+you were using — but the two never share data. To check what is actually on a phone:
+
+```bash
+adb shell pm list packages | grep journal
+```
+
+Switching packages on purpose means exporting a JSON backup from the old one and importing into
+the new one. That moves **entries only**. The API key, schedule, accent, app lock and — for
+backups written by v1.1.0 or earlier, whose format has no `reflections` array — the weekly
+reflection all live in per-package storage and have to be set up again. Uninstall the old package
+afterwards, or both keep scheduling notifications.
+
+**Updates only install over the top if the signing key is unchanged.** After a CI run, expand
+*Report signing identity* in the log and check the SHA-256 is the same as last time. If it drifts,
+the `KEYSTORE_BASE64` secret is not set and CI is falling back to a cached generated key — see
+*Making updates installable* below. That matters more once more than one person is installing
+these builds, because a key change forces everyone to uninstall and re-import.
+
+**Sharing a build.** The APK contains no personal data — the OpenRouter key is entered per device
+and stored encrypted — so each person needs their own key, or they are spending yours. They will
+also need to allow installs from unknown sources, since this is not a Play Store release.
+
+---
+
 ## Build
 
 The repository intentionally does not commit `gradle/wrapper/gradle-wrapper.jar` (a binary). Generate
