@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -57,17 +59,23 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journal.app.R
 import com.journal.app.data.local.JournalEntry
+import com.journal.app.data.local.Reflection
 import com.journal.app.ui.FeedFilter
+import com.journal.app.ui.FeedItem
 import com.journal.app.ui.JournalViewModel
 import com.journal.app.ui.components.EntryCard
 import com.journal.app.ui.components.JournalCalendar
+import com.journal.app.ui.components.ReflectionBody
+import com.journal.app.ui.components.ReflectionMarker
 import com.journal.app.ui.components.SectionCard
 import com.journal.app.ui.components.TagEditor
 import com.journal.app.ui.components.formatDayHeader
+import com.journal.app.ui.components.formatReflectionPeriod
 import com.journal.app.ui.theme.CardSurface
 import com.journal.app.ui.theme.TextSecondary
 import com.journal.app.ui.theme.TextTertiary
@@ -83,7 +91,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val allEntries by viewModel.entries.collectAsStateWithLifecycle()
-    val entries by viewModel.visibleEntries.collectAsStateWithLifecycle()
+    val feed by viewModel.feed.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val dayCounts by viewModel.dayCounts.collectAsStateWithLifecycle()
     val quickPrompt by viewModel.quickAddPrompt.collectAsStateWithLifecycle()
@@ -94,6 +102,7 @@ fun HomeScreen(
     var calendarOpen by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<JournalEntry?>(null) }
     var editing by remember { mutableStateOf<JournalEntry?>(null) }
+    var readingReflection by remember { mutableStateOf<Reflection?>(null) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -132,7 +141,7 @@ fun HomeScreen(
                 // different answers — offering to clear a filter you do not have is noise.
                 allEntries.isEmpty() -> EmptyTimeline(modifier = Modifier.fillMaxSize())
 
-                entries.isEmpty() -> NoResults(
+                feed.isEmpty() -> NoResults(
                     onClear = {
                         viewModel.clearFilter()
                         calendarOpen = false
@@ -141,14 +150,15 @@ fun HomeScreen(
                 )
 
                 else -> Timeline(
-                    entries = entries,
+                    items = feed,
                     // A relevance-ranked list must not be chopped into day groups: the headers
                     // would claim an order the list does not have.
                     grouped = !filter.isSearching(),
                     activeTag = filter.tag,
                     onDelete = { pendingDelete = it },
                     onEdit = { editing = it },
-                    onTagClick = viewModel::toggleTagFilter
+                    onTagClick = viewModel::toggleTagFilter,
+                    onOpenReflection = { readingReflection = it }
                 )
             }
         }
@@ -232,6 +242,54 @@ fun HomeScreen(
         }
     }
 
+    // Tapping a timeline marker reads the reflection here rather than jumping to ანალიზი, which
+    // would throw away the scroll position the user came from.
+    readingReflection?.let { reflection ->
+        var sourcesOpen by remember(reflection.id) { mutableStateOf(false) }
+        ModalBottomSheet(
+            onDismissRequest = { readingReflection = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = CardSurface,
+            dragHandle = null
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.reflection_marker),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = formatReflectionPeriod(reflection),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                ReflectionBody(
+                    reflection = reflection,
+                    sources = viewModel.sourceEntriesOf(reflection),
+                    sourcesExpanded = sourcesOpen,
+                    onToggleSources = { sourcesOpen = !sourcesOpen }
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { readingReflection = null }) {
+                        Text(stringResource(R.string.action_close), color = TextSecondary)
+                    }
+                }
+            }
+        }
+    }
+
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -239,9 +297,12 @@ fun HomeScreen(
             title = { Text(stringResource(R.string.action_delete)) },
             text = {
                 Text(
-                    text = entry.content.take(120),
+                    text = entry.content,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    // Was a silent take(120); the renderer knows where the text really stops.
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis
                 )
             },
             confirmButton = {
@@ -399,24 +460,25 @@ private fun DismissibleFilterChip(label: String, onDismiss: () -> Unit) {
 
 @Composable
 private fun Timeline(
-    entries: List<JournalEntry>,
+    items: List<FeedItem>,
     grouped: Boolean,
     activeTag: String?,
     onDelete: (JournalEntry) -> Unit,
     onEdit: (JournalEntry) -> Unit,
     onTagClick: (String) -> Unit,
+    onOpenReflection: (Reflection) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val zone = remember { ZoneId.systemDefault() }
-    // Entries arrive newest-first from Room; grouping preserves that order.
-    val groups = remember(entries, grouped) {
+    // Items arrive newest-first; grouping preserves that order.
+    val groups = remember(items, grouped) {
         if (grouped) {
-            entries.groupBy { Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() }
+            items.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
         } else {
             emptyMap()
         }
     }
-    val today = remember(entries) { LocalDate.now(zone) }
+    val today = remember(items) { LocalDate.now(zone) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -424,7 +486,7 @@ private fun Timeline(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         if (grouped) {
-            groups.forEach { (date, dayEntries) ->
+            groups.forEach { (date, dayItems) ->
                 item(key = "header-$date") {
                     DayHeader(
                         label = when (date) {
@@ -432,16 +494,19 @@ private fun Timeline(
                             today.minusDays(1) -> stringResource(R.string.home_yesterday)
                             else -> formatDayHeader(date)
                         },
-                        count = dayEntries.size
+                        // A reflection marker is not an entry; counting it would overstate
+                        // what was actually written that day.
+                        count = dayItems.count { it is FeedItem.Entry }
                     )
                 }
-                items(items = dayEntries, key = { it.id }) { entry ->
-                    EntryCard(
-                        entry = entry,
+                items(items = dayItems, key = { it.key }) { item ->
+                    FeedRow(
+                        item = item,
+                        activeTag = activeTag,
                         onDelete = onDelete,
                         onEdit = onEdit,
                         onTagClick = onTagClick,
-                        activeTag = activeTag
+                        onOpenReflection = onOpenReflection
                     )
                 }
             }
@@ -449,19 +514,45 @@ private fun Timeline(
             item(key = "result-count") {
                 DayHeader(
                     label = stringResource(R.string.home_results),
-                    count = entries.size
+                    count = items.size
                 )
             }
-            items(items = entries, key = { it.id }) { entry ->
-                EntryCard(
-                    entry = entry,
+            items(items = items, key = { it.key }) { item ->
+                FeedRow(
+                    item = item,
+                    activeTag = activeTag,
                     onDelete = onDelete,
                     onEdit = onEdit,
                     onTagClick = onTagClick,
-                    activeTag = activeTag
+                    onOpenReflection = onOpenReflection
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun FeedRow(
+    item: FeedItem,
+    activeTag: String?,
+    onDelete: (JournalEntry) -> Unit,
+    onEdit: (JournalEntry) -> Unit,
+    onTagClick: (String) -> Unit,
+    onOpenReflection: (Reflection) -> Unit
+) {
+    when (item) {
+        is FeedItem.Entry -> EntryCard(
+            entry = item.entry,
+            onDelete = onDelete,
+            onEdit = onEdit,
+            onTagClick = onTagClick,
+            activeTag = activeTag
+        )
+
+        is FeedItem.ReflectionMark -> ReflectionMarker(
+            reflection = item.reflection,
+            onClick = { onOpenReflection(item.reflection) }
+        )
     }
 }
 

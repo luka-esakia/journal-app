@@ -44,6 +44,23 @@ object JournalExporter {
     /** Enough of a source entry to recognise it in the timeline above, not a second copy of it. */
     private const val SOURCE_PREVIEW_CHARS = 90
 
+    /**
+     * A one-line citation of a source entry, ellipsised when it was actually cut.
+     *
+     * The UI can hand this job to the renderer (`maxLines` + `TextOverflow.Ellipsis`), which
+     * knows where the text stops fitting. A text file has no renderer, so the cut is by
+     * character — and it has to be marked, or the export silently presents a truncated entry as
+     * the whole thing. The entry itself is written out in full further up the document.
+     */
+    private fun preview(content: String): String {
+        val flat = content.replace('\n', ' ').trim()
+        return if (flat.length <= SOURCE_PREVIEW_CHARS) {
+            flat
+        } else {
+            flat.take(SOURCE_PREVIEW_CHARS).trimEnd() + "…"
+        }
+    }
+
     fun suggestedFileName(extension: String, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
         val stamp = Instant.ofEpochMilli(now).atZone(zone).format(FILE_STAMP)
         return "mind-journal-$stamp.$extension"
@@ -193,10 +210,7 @@ object JournalExporter {
                 appendLine("წყარო ჩანაწერები (${sources.size}):")
                 sources.forEach { source ->
                     val at = Instant.ofEpochMilli(source.createdAt).atZone(zone)
-                    appendLine(
-                        "- " + at.format(SOURCE_STAMP) + " — " +
-                            source.content.replace('\n', ' ').trim().take(SOURCE_PREVIEW_CHARS)
-                    )
+                    appendLine("- " + at.format(SOURCE_STAMP) + " — " + preview(source.content))
                 }
             }
             appendLine()

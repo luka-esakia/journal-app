@@ -161,6 +161,35 @@ Migration 2 → 3 creates the table and moves the one legacy preference reflecti
 empty source list — pre-v3 storage never recorded them, and an empty list is more truthful than a
 plausible reconstruction.
 
+**Where a reflection is shown, and why not in full.** A 150–220 word Georgian reflection at
+`bodyLarge` 17sp/25sp is roughly a screen and a half. The weekly worker makes ~52 a year, so
+rendering them all turned **ანალიზი** into an archive you had to scroll past to reach anything
+else. Three surfaces now, each showing a different amount:
+
+- **Timeline** — a slim accent-tinted `ReflectionMarker`, placed on the day it was *generated*
+  and labelled with the week it *covers*. Deliberately a signpost, not a card: a wall of AI prose
+  every seventh scroll position would bury the entries the journal is for. Tapping opens it in a
+  sheet rather than jumping tabs, which would throw away the scroll position. Markers vanish the
+  moment any filter is active — a reflection has no tags, so a tag filter could never match one,
+  and an unranked row among relevance-ranked results is a lie about the ordering.
+- **ანალიზი** — the latest in full, then three collapsed `ReflectionRow`s and `ყველას ნახვა (N)`.
+  Fixed height regardless of how many exist.
+- **History sheet** — the whole archive, grouped by month, every row collapsed to one line that
+  expands in place. Fifty one-line rows is scannable; fifty full reflections is eighty screens.
+
+The tag cloud got the same treatment for the same reason: `tagCounts` is every distinct tag ever
+and the model emits 2–4 per entry, so a year in there is a long tail used exactly once. It shows
+the top twelve by frequency with `კიდევ N თემა` to expand.
+
+Neither is a performance fix — `LazyColumn` only composes what is visible. Both are findability
+fixes.
+
+**Truncation is the renderer's job where there is one.** Source citations and the delete-dialog
+preview use `maxLines` + `TextOverflow.Ellipsis`, so the `…` lands where the text actually stops
+fitting on that device rather than at an arbitrary character. The Markdown export has no
+renderer, so it cuts by character — but marks the cut, because an export that silently presents
+a truncated entry as the whole thing is worse than one that is visibly abridged.
+
 ### 4. Search, filtering and the calendar
 
 **Fuzzy search** — `data/search/FuzzySearch.kt`. Not `LIKE '%…%'`, and not FTS5. Georgian is

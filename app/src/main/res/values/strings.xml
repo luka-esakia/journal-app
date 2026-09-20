@@ -77,6 +77,13 @@
     <string name="insights_sources_unknown">წყარო ჩანაწერები ამ რეფლექსიისთვის არ არის ჩაწერილი.</string>
     <string name="insights_sources_missing">%1$d წყარო ჩანაწერი წაშლილია.</string>
     <string name="insights_history">წინა რეფლექსიები (%1$d)</string>
+    <string name="insights_history_title">რეფლექსიების ისტორია</string>
+    <string name="insights_see_all">ყველას ნახვა (%1$d)</string>
+    <string name="insights_tags_more">კიდევ %1$d თემა</string>
+    <string name="insights_tags_less">ნაკლების ჩვენება</string>
+    <string name="reflection_marker">კვირის რეფლექსია</string>
+    <string name="reflection_open">რეფლექსიის გახსნა</string>
+    <string name="action_close">დახურვა</string>
     <string name="insights_reflection_done">რეფლექსია მზადაა — %1$d ჩანაწერიდან</string>
     <string name="insights_reflection_deleted">რეფლექსია წაიშალა</string>
 

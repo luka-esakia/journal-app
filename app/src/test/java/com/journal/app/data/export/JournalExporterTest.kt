@@ -173,6 +173,31 @@ class JournalExporterTest {
     }
 
     @Test
+    fun `a cut source citation is marked as cut`() {
+        val long = JournalEntry(
+            id = 5,
+            content = "ა".repeat(400),
+            createdAt = 1_759_100_000_000L
+        )
+        val short = JournalEntry(id = 6, content = "მოკლე", createdAt = 1_759_200_000_000L)
+        val linked = reflection.copy(sourceEntryIds = "5,6")
+
+        val md = JournalExporter.toMarkdown(
+            listOf(long, short),
+            exportedAt,
+            listOf(linked),
+            zone
+        )
+
+        // The citation is truncated and says so; the entry itself appears in full further up.
+        assertTrue("long citation should be ellipsised", md.contains("ა".repeat(90) + "…"))
+        assertTrue("entry body must still be complete", md.contains("ა".repeat(400)))
+        // A short entry is quoted verbatim, with no misleading ellipsis.
+        assertTrue(md.contains("— მოკლე"))
+        assertTrue("short citation must not be ellipsised", !md.contains("მოკლე…"))
+    }
+
+    @Test
     fun `markdown omits the reflection section entirely when there are none`() {
         val md = JournalExporter.toMarkdown(entries, exportedAt, zone = zone)
         assertTrue(md, !md.contains("რეფლექსიები"))

@@ -54,10 +54,18 @@ data class Reflection(
     val model: String = ""
 ) {
 
-    /** Source ids as a clean list; a function so Room never mistakes it for a column. */
+    /**
+     * Source ids as a clean list; a function so Room never mistakes it for a column.
+     *
+     * De-duplicated to match [joinIds], which de-duplicates on the way in. Without that the two
+     * disagree for any column not written by this class — a hand-edited backup, say — and
+     * [sourceCount] would exceed the number of rows `id IN (…)` can ever return, making the UI
+     * report entries as deleted that were never there twice to begin with.
+     */
     fun sourceIdList(): List<Long> =
         sourceEntryIds.split(ID_SEPARATOR)
             .mapNotNull { it.trim().toLongOrNull() }
+            .distinct()
 
     fun sourceCount(): Int = sourceIdList().size
 
